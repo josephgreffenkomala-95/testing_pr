@@ -5,8 +5,8 @@ def calculate(expression):
     try:
         result = eval(expression)
         return result
-    except:
-        return "Error: Invalid expression"
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -15,3 +15,4 @@ if __name__ == "__main__":
     else:
         print("Usage: python3 calculator.py <expression>")
         print("Example: python3 calculator.py '2 + 3 * 4'")
+        print("Supported: +, -, *, /, **, %")
