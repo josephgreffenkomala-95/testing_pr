@@ -1,6 +1,11 @@
-from typing import List, Optional
+import json
+import os
+from typing import List
 
 TodoList = List[dict]
+
+_next_id = 0
+_DEFAULT_FILE = "todos.json"
 
 
 def create_todo_list() -> TodoList:
@@ -8,20 +13,32 @@ def create_todo_list() -> TodoList:
     return []
 
 
-def add_item(todo_list: TodoList, item: str) -> TodoList:
-    """Add a new task to the to-do list and return the list."""
-    todo_list.append({"task": item, "done": False})
+def add_item(todo_list: TodoList, item: str, max_length: int = 200) -> TodoList:
+    """Add a new task to the to-do list and return the list.
+
+    Strips leading/trailing whitespace. Raises ValueError if the resulting
+    string is empty or exceeds max_length.
+    """
+    global _next_id
+    stripped = item.strip()
+    if not stripped:
+        raise ValueError("Item must not be empty or whitespace-only")
+    if len(stripped) > max_length:
+        raise ValueError(f"Item exceeds maximum length of {max_length} characters")
+    todo_list.append({"id": _next_id, "task": stripped, "done": False})
+    _next_id += 1
     return todo_list
 
 
-def mark_done(todo_list: TodoList, index: int) -> bool:
-    """Mark the item at the given index as done.
+def mark_done(todo_list: TodoList, item_id: int) -> bool:
+    """Mark the item with the given id as done.
 
     Returns True if the item was found and marked, False otherwise.
     """
-    if 0 <= index < len(todo_list):
-        todo_list[index]["done"] = True
-        return True
+    for item in todo_list:
+        if item["id"] == item_id:
+            item["done"] = True
+            return True
     return False
 
 
@@ -30,24 +47,46 @@ def list_items(todo_list: TodoList) -> None:
     if not todo_list:
         print("No items in the to-do list.")
         return
-    for i, item in enumerate(todo_list):
+    for item in todo_list:
         status = "x" if item["done"] else " "
-        print(f"  [{status}] {i}: {item['task']}")
+        print(f"  [{status}] {item['id']}: {item['task']}")
 
 
-def remove_item(todo_list: TodoList, index: int) -> bool:
-    """Remove the item at the given index.
+def remove_item(todo_list: TodoList, item_id: int) -> bool:
+    """Remove the item with the given id.
 
     Returns True if the item was removed, False otherwise.
     """
-    if 0 <= index < len(todo_list):
-        todo_list.pop(index)
-        return True
+    for i, item in enumerate(todo_list):
+        if item["id"] == item_id:
+            todo_list.pop(i)
+            return True
     return False
 
 
+def save_todo_list(todo_list: TodoList, filepath: str = _DEFAULT_FILE) -> None:
+    """Save the to-do list to a JSON file."""
+    with open(filepath, "w") as f:
+        json.dump(todo_list, f, indent=2)
+
+
+def load_todo_list(filepath: str = _DEFAULT_FILE) -> TodoList:
+    """Load the to-do list from a JSON file.
+
+    Returns an empty list if the file does not exist.
+    """
+    global _next_id
+    if not os.path.exists(filepath):
+        return []
+    with open(filepath, "r") as f:
+        data = json.load(f)
+    if data:
+        _next_id = max(item["id"] for item in data) + 1
+    return data
+
+
 if __name__ == "__main__":
-    todos = create_todo_list()
+    todos = load_todo_list()
 
     while True:
         print("\n--- To-Do List ---")
@@ -60,9 +99,12 @@ if __name__ == "__main__":
 
         if choice == "1":
             task = input("Enter task: ").strip()
-            if task:
+            try:
                 add_item(todos, task)
+                save_todo_list(todos)
                 print(f"Added: {task}")
+            except ValueError as e:
+                print(f"Error: {e}")
         elif choice == "2":
             list_items(todos)
         elif choice == "3":
@@ -70,12 +112,13 @@ if __name__ == "__main__":
                 print("No items in the to-do list.")
                 continue
             list_items(todos)
-            idx = input("Enter item number to mark done: ").strip()
-            if idx.isdigit():
-                if mark_done(todos, int(idx)):
+            raw = input("Enter item ID to mark done: ").strip()
+            if raw.isdigit():
+                if mark_done(todos, int(raw)):
+                    save_todo_list(todos)
                     print("Item marked as done.")
                 else:
-                    print("Invalid item number.")
+                    print("Invalid item ID.")
             else:
                 print("Invalid input.")
         elif choice == "4":
@@ -83,15 +126,17 @@ if __name__ == "__main__":
                 print("No items in the to-do list.")
                 continue
             list_items(todos)
-            idx = input("Enter item number to remove: ").strip()
-            if idx.isdigit():
-                if remove_item(todos, int(idx)):
+            raw = input("Enter item ID to remove: ").strip()
+            if raw.isdigit():
+                if remove_item(todos, int(raw)):
+                    save_todo_list(todos)
                     print("Item removed.")
                 else:
-                    print("Invalid item number.")
+                    print("Invalid item ID.")
             else:
                 print("Invalid input.")
         elif choice == "5":
+            save_todo_list(todos)
             print("Goodbye!")
             break
         else:
