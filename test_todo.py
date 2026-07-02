@@ -563,7 +563,7 @@ class TestStats(unittest.TestCase):
 class TestUndo(unittest.TestCase):
     def setUp(self):
         import todo
-        todo._UNDO_STACK.clear()
+        todo._UNDO_STACKS.clear()
 
     def test_undo_reverts_add(self):
         from todo import _push_undo

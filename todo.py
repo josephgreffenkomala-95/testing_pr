@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import csv
@@ -8,7 +9,7 @@ TodoList = List[dict]
 
 _next_id = 0
 _DEFAULT_FILE = "todos.json"
-_UNDO_STACK = []
+_UNDO_STACKS = {}
 _UNDO_MAX = 50
 
 _VALID_PRIORITIES = ("low", "medium", "high")
@@ -29,31 +30,44 @@ _DEFAULT_CONFIG = {
     "sort_newest_first": False,
 }
 
+_cached_config = None
+
 
 def _load_config():
+    global _cached_config
+    if _cached_config is not None:
+        return _cached_config.copy()
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".todorc")
+    config = _DEFAULT_CONFIG.copy()
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             user_config = json.load(f)
-        config = _DEFAULT_CONFIG.copy()
         config.update(user_config)
-        return config
-    return _DEFAULT_CONFIG.copy()
+    _cached_config = config
+    return config.copy()
+
+
+def _get_undo_stack(todo_list):
+    list_id = id(todo_list)
+    if list_id not in _UNDO_STACKS:
+        _UNDO_STACKS[list_id] = []
+    return _UNDO_STACKS[list_id]
 
 
 def _push_undo(todo_list):
-    global _UNDO_STACK
+    stack = _get_undo_stack(todo_list)
     snapshot = json.loads(json.dumps(todo_list))
-    _UNDO_STACK.append(snapshot)
-    if len(_UNDO_STACK) > _UNDO_MAX:
-        _UNDO_STACK = _UNDO_STACK[-_UNDO_MAX:]
+    stack.append(snapshot)
+    if len(stack) > _UNDO_MAX:
+        _UNDO_STACKS[id(todo_list)] = stack[-_UNDO_MAX:]
 
 
 def undo(todo_list: TodoList) -> bool:
-    global _next_id, _UNDO_STACK
-    if not _UNDO_STACK:
+    global _next_id
+    stack = _get_undo_stack(todo_list)
+    if not stack:
         return False
-    prev = _UNDO_STACK.pop()
+    prev = stack.pop()
     todo_list.clear()
     for item in prev:
         todo_list.append(item)
@@ -71,7 +85,7 @@ def create_todo_list() -> TodoList:
 def add_item(
     todo_list: TodoList,
     item: str,
-    priority: str = "medium",
+    priority: Optional[str] = None,
     due: Optional[str] = None,
     tags: Optional[str] = None,
     max_length: int = 200,
@@ -86,11 +100,11 @@ def add_item(
         raise ValueError("Item must not be empty or whitespace-only")
     if len(stripped) > max_length:
         raise ValueError(f"Item exceeds maximum length of {max_length} characters")
+    if priority is None:
+        priority = config.get("default_priority", "medium")
     priority = priority.lower()
     if priority not in _VALID_PRIORITIES:
         raise ValueError(f"Priority must be one of {_VALID_PRIORITIES}")
-    if priority == "medium" and "default_priority" in config:
-        priority = config["default_priority"]
     due_date = None
     if due is not None:
         try:
@@ -198,12 +212,10 @@ def remove_item(todo_list: TodoList, item_id: int) -> bool:
 
 
 def clear_done(todo_list: TodoList) -> int:
-    done_items = [item for item in todo_list if item["done"]]
-    count = len(done_items)
+    count = sum(1 for item in todo_list if item["done"])
     if count > 0:
         _push_undo(todo_list)
-    for item in done_items:
-        todo_list.remove(item)
+    todo_list[:] = [item for item in todo_list if not item["done"]]
     return count
 
 
@@ -219,7 +231,7 @@ def search_items(todo_list: TodoList, query: str, search_tags: bool = False) -> 
                 if query_lower in tag:
                     results.append(item)
                     break
-    return results
+    return copy.deepcopy(results)
 
 
 def list_items(
@@ -330,6 +342,9 @@ def stats(todo_list: TodoList) -> None:
 
 
 def export_todo_list(todo_list: TodoList, filepath: str, fmt: str = "csv") -> None:
+    abs_path = os.path.abspath(filepath)
+    if not abs_path.startswith(os.getcwd()):
+        raise ValueError("Export path must be within the current working directory")
     if fmt == "csv":
         with open(filepath, "w", newline="") as f:
             writer = csv.writer(f)
