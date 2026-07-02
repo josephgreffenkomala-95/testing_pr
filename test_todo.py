@@ -14,8 +14,13 @@ from todo import (
     remove_item,
     clear_done,
     search_items,
+    set_priority,
+    set_due,
+    set_tags,
     list_items,
     stats,
+    export_todo_list,
+    undo,
     save_todo_list,
     load_todo_list,
 )
@@ -130,6 +135,36 @@ class TestAddItem(unittest.TestCase):
         self.assertIn("created_at", todos[0])
         self.assertTrue(len(todos[0]["created_at"]) > 0)
 
+    def test_tags_single(self):
+        todos = create_todo_list()
+        add_item(todos, "Task", tags="work")
+        self.assertEqual(todos[0]["tags"], ["work"])
+
+    def test_tags_multiple(self):
+        todos = create_todo_list()
+        add_item(todos, "Task", tags="work,urgent,home")
+        self.assertEqual(todos[0]["tags"], ["work", "urgent", "home"])
+
+    def test_tags_strips_whitespace_and_lowercases(self):
+        todos = create_todo_list()
+        add_item(todos, "Task", tags=" Work , URGENT ")
+        self.assertEqual(todos[0]["tags"], ["work", "urgent"])
+
+    def test_tags_max_five(self):
+        todos = create_todo_list()
+        with self.assertRaises(ValueError):
+            add_item(todos, "Task", tags="a,b,c,d,e,f")
+
+    def test_tags_empty_string_default(self):
+        todos = create_todo_list()
+        add_item(todos, "Task", tags="")
+        self.assertEqual(todos[0]["tags"], [])
+
+    def test_no_tags_default(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        self.assertEqual(todos[0]["tags"], [])
+
 
 class TestEditItem(unittest.TestCase):
     def test_edit_existing_item(self):
@@ -169,6 +204,83 @@ class TestEditItem(unittest.TestCase):
         result = edit_item(todos, todos[0]["id"], "x" * 200)
         self.assertTrue(result)
         self.assertEqual(todos[0]["task"], "x" * 200)
+
+
+class TestSetPriority(unittest.TestCase):
+    def test_set_priority_valid(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_priority(todos, todos[0]["id"], "high")
+        self.assertTrue(result)
+        self.assertEqual(todos[0]["priority"], "high")
+
+    def test_set_priority_case_insensitive(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_priority(todos, todos[0]["id"], "HIGH")
+        self.assertTrue(result)
+        self.assertEqual(todos[0]["priority"], "high")
+
+    def test_set_priority_invalid(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        with self.assertRaises(ValueError):
+            set_priority(todos, todos[0]["id"], "urgent")
+
+    def test_set_priority_nonexistent(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_priority(todos, 9999, "high")
+        self.assertFalse(result)
+
+
+class TestSetDue(unittest.TestCase):
+    def test_set_due_date(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_due(todos, todos[0]["id"], "2025-12-31")
+        self.assertTrue(result)
+        self.assertEqual(todos[0]["due"], "2025-12-31")
+
+    def test_clear_due_date(self):
+        todos = create_todo_list()
+        add_item(todos, "Task", due="2025-12-31")
+        result = set_due(todos, todos[0]["id"], None)
+        self.assertTrue(result)
+        self.assertIsNone(todos[0]["due"])
+
+    def test_set_due_invalid_format(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        with self.assertRaises(ValueError):
+            set_due(todos, todos[0]["id"], "12-31-2025")
+
+    def test_set_due_nonexistent(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_due(todos, 9999, "2025-12-31")
+        self.assertFalse(result)
+
+
+class TestSetTags(unittest.TestCase):
+    def test_set_tags(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_tags(todos, todos[0]["id"], "work,urgent")
+        self.assertTrue(result)
+        self.assertEqual(todos[0]["tags"], ["work", "urgent"])
+
+    def test_set_tags_exceeds_max(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        with self.assertRaises(ValueError):
+            set_tags(todos, todos[0]["id"], "a,b,c,d,e,f")
+
+    def test_set_tags_nonexistent(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = set_tags(todos, 9999, "work")
+        self.assertFalse(result)
 
 
 class TestMarkDone(unittest.TestCase):
@@ -296,6 +408,24 @@ class TestListItems(unittest.TestCase):
             list_items(todos, color=False)
         self.assertIn("due: 2025-12-31", mock_stdout.getvalue())
 
+    def test_list_tag_filter(self):
+        todos = create_todo_list()
+        add_item(todos, "Work task", tags="work,meeting")
+        add_item(todos, "Home task", tags="home")
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            list_items(todos, tag_filter="work", color=False)
+        output = mock_stdout.getvalue()
+        self.assertIn("Work task", output)
+        self.assertNotIn("Home task", output)
+
+    def test_list_shows_tags(self):
+        todos = create_todo_list()
+        add_item(todos, "Task", tags="work,urgent")
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            list_items(todos, color=False)
+        output = mock_stdout.getvalue()
+        self.assertIn("{work,urgent}", output)
+
 
 class TestRemoveItem(unittest.TestCase):
     def test_remove_valid_id(self):
@@ -384,6 +514,20 @@ class TestSearchItems(unittest.TestCase):
         results = search_items(todos, "buy")
         self.assertEqual(len(results), 2)
 
+    def test_search_by_tag(self):
+        todos = create_todo_list()
+        add_item(todos, "Meeting", tags="work,meeting")
+        add_item(todos, "Groceries", tags="home")
+        results = search_items(todos, "work", search_tags=True)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["task"], "Meeting")
+
+    def test_search_tags_false_by_default(self):
+        todos = create_todo_list()
+        add_item(todos, "Meeting", tags="work")
+        results = search_items(todos, "work", search_tags=False)
+        self.assertEqual(len(results), 0)
+
 
 class TestStats(unittest.TestCase):
     def test_stats_output(self):
@@ -404,6 +548,85 @@ class TestStats(unittest.TestCase):
             stats(todos)
         output = mock_stdout.getvalue()
         self.assertIn("Total:    0", output)
+
+    def test_stats_shows_tags(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1", tags="work")
+        add_item(todos, "Task 2", tags="work,home")
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            stats(todos)
+        output = mock_stdout.getvalue()
+        self.assertIn("Tags:", output)
+        self.assertIn("work", output)
+
+
+class TestUndo(unittest.TestCase):
+    def setUp(self):
+        import todo
+        todo._UNDO_STACK.clear()
+
+    def test_undo_reverts_add(self):
+        from todo import _push_undo
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        _push_undo(todos)
+        add_item(todos, "Task 2")
+        self.assertEqual(len(todos), 2)
+        result = undo(todos)
+        self.assertTrue(result)
+        self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["task"], "Task 1")
+
+    def test_undo_nothing_to_undo(self):
+        todos = create_todo_list()
+        result = undo(todos)
+        self.assertFalse(result)
+
+
+class TestExport(unittest.TestCase):
+    def setUp(self):
+        self.test_file = "test_export.csv"
+        self.test_txt = "test_export.txt"
+        self.test_json = "test_export.json"
+
+    def tearDown(self):
+        for f in [self.test_file, self.test_txt, self.test_json]:
+            if os.path.exists(f):
+                os.remove(f)
+
+    def test_export_csv(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1", priority="high", tags="work")
+        export_todo_list(todos, self.test_file, fmt="csv")
+        self.assertTrue(os.path.exists(self.test_file))
+        with open(self.test_file, "r") as f:
+            content = f.read()
+        self.assertIn("task", content)
+        self.assertIn("Task 1", content)
+
+    def test_export_txt(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        export_todo_list(todos, self.test_txt, fmt="txt")
+        self.assertTrue(os.path.exists(self.test_txt))
+        with open(self.test_txt, "r") as f:
+            content = f.read()
+        self.assertIn("Task 1", content)
+
+    def test_export_json(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        export_todo_list(todos, self.test_json, fmt="json")
+        self.assertTrue(os.path.exists(self.test_json))
+        with open(self.test_json, "r") as f:
+            data = json.load(f)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["task"], "Task 1")
+
+    def test_export_invalid_format(self):
+        todos = create_todo_list()
+        with self.assertRaises(ValueError):
+            export_todo_list(todos, "output.xyz", fmt="xyz")
 
 
 class TestPersistence(unittest.TestCase):
@@ -478,6 +701,16 @@ class TestPersistence(unittest.TestCase):
         self.assertTrue(loaded[0]["done"])
         self.assertFalse(loaded[1]["done"])
 
+    def test_save_and_load_tags(self):
+        import todo
+        todo._next_id = 0
+        todos = create_todo_list()
+        add_item(todos, "Task", tags="work,urgent")
+        save_todo_list(todos, self.test_file)
+
+        loaded = load_todo_list(self.test_file)
+        self.assertEqual(loaded[0]["tags"], ["work", "urgent"])
+
     def test_load_skips_items_missing_required_keys(self):
         with open(self.test_file, "w") as f:
             json.dump([
@@ -499,6 +732,7 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual(loaded[0]["priority"], "medium")
         self.assertIsNone(loaded[0]["due"])
         self.assertEqual(loaded[0]["created_at"], "")
+        self.assertEqual(loaded[0]["tags"], [])
 
 
 if __name__ == "__main__":

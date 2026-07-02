@@ -1,5 +1,6 @@
 import json
 import os
+import csv
 from datetime import datetime
 from typing import List, Optional
 
@@ -7,6 +8,8 @@ TodoList = List[dict]
 
 _next_id = 0
 _DEFAULT_FILE = "todos.json"
+_UNDO_STACK = []
+_UNDO_MAX = 50
 
 _VALID_PRIORITIES = ("low", "medium", "high")
 _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -18,6 +21,47 @@ _ANSI_GREEN = "\033[92m"
 _ANSI_CYAN = "\033[96m"
 _ANSI_BOLD = "\033[1m"
 _ANSI_DIM = "\033[2m"
+_ANSI_MAGENTA = "\033[95m"
+
+_DEFAULT_CONFIG = {
+    "default_priority": "medium",
+    "max_tasks": 1000,
+    "sort_newest_first": False,
+}
+
+
+def _load_config():
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".todorc")
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            user_config = json.load(f)
+        config = _DEFAULT_CONFIG.copy()
+        config.update(user_config)
+        return config
+    return _DEFAULT_CONFIG.copy()
+
+
+def _push_undo(todo_list):
+    global _UNDO_STACK
+    snapshot = json.loads(json.dumps(todo_list))
+    _UNDO_STACK.append(snapshot)
+    if len(_UNDO_STACK) > _UNDO_MAX:
+        _UNDO_STACK = _UNDO_STACK[-_UNDO_MAX:]
+
+
+def undo(todo_list: TodoList) -> bool:
+    global _next_id, _UNDO_STACK
+    if not _UNDO_STACK:
+        return False
+    prev = _UNDO_STACK.pop()
+    todo_list.clear()
+    for item in prev:
+        todo_list.append(item)
+    if todo_list:
+        _next_id = max(item["id"] for item in todo_list) + 1
+    else:
+        _next_id = 0
+    return True
 
 
 def create_todo_list() -> TodoList:
@@ -29,9 +73,14 @@ def add_item(
     item: str,
     priority: str = "medium",
     due: Optional[str] = None,
+    tags: Optional[str] = None,
     max_length: int = 200,
 ) -> TodoList:
     global _next_id
+    config = _load_config()
+    max_tasks = config.get("max_tasks", 1000)
+    if len(todo_list) >= max_tasks:
+        raise ValueError(f"Cannot exceed maximum of {max_tasks} tasks")
     stripped = item.strip()
     if not stripped:
         raise ValueError("Item must not be empty or whitespace-only")
@@ -40,12 +89,19 @@ def add_item(
     priority = priority.lower()
     if priority not in _VALID_PRIORITIES:
         raise ValueError(f"Priority must be one of {_VALID_PRIORITIES}")
+    if priority == "medium" and "default_priority" in config:
+        priority = config["default_priority"]
     due_date = None
     if due is not None:
         try:
             due_date = datetime.strptime(due, "%Y-%m-%d").strftime("%Y-%m-%d")
         except ValueError:
             raise ValueError("Due date must be in YYYY-MM-DD format")
+    tag_list = []
+    if tags is not None:
+        tag_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
+        if len(tag_list) > 5:
+            raise ValueError("Maximum 5 tags per item")
     todo_list.append(
         {
             "id": _next_id,
@@ -53,6 +109,7 @@ def add_item(
             "done": False,
             "priority": priority,
             "due": due_date,
+            "tags": tag_list,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
     )
@@ -68,7 +125,47 @@ def edit_item(todo_list: TodoList, item_id: int, new_task: str, max_length: int 
         raise ValueError(f"Item exceeds maximum length of {max_length} characters")
     for item in todo_list:
         if item["id"] == item_id:
+            _push_undo(todo_list)
             item["task"] = stripped
+            return True
+    return False
+
+
+def set_priority(todo_list: TodoList, item_id: int, priority: str) -> bool:
+    priority = priority.lower()
+    if priority not in _VALID_PRIORITIES:
+        raise ValueError(f"Priority must be one of {_VALID_PRIORITIES}")
+    for item in todo_list:
+        if item["id"] == item_id:
+            _push_undo(todo_list)
+            item["priority"] = priority
+            return True
+    return False
+
+
+def set_due(todo_list: TodoList, item_id: int, due: Optional[str]) -> bool:
+    due_date = None
+    if due is not None:
+        try:
+            due_date = datetime.strptime(due, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Due date must be in YYYY-MM-DD format")
+    for item in todo_list:
+        if item["id"] == item_id:
+            _push_undo(todo_list)
+            item["due"] = due_date
+            return True
+    return False
+
+
+def set_tags(todo_list: TodoList, item_id: int, tags: str) -> bool:
+    tag_list = [t.strip().lower() for t in tags.split(",") if t.strip()]
+    if len(tag_list) > 5:
+        raise ValueError("Maximum 5 tags per item")
+    for item in todo_list:
+        if item["id"] == item_id:
+            _push_undo(todo_list)
+            item["tags"] = tag_list
             return True
     return False
 
@@ -76,6 +173,7 @@ def edit_item(todo_list: TodoList, item_id: int, new_task: str, max_length: int 
 def mark_done(todo_list: TodoList, item_id: int) -> bool:
     for item in todo_list:
         if item["id"] == item_id:
+            _push_undo(todo_list)
             item["done"] = True
             return True
     return False
@@ -84,6 +182,7 @@ def mark_done(todo_list: TodoList, item_id: int) -> bool:
 def mark_undone(todo_list: TodoList, item_id: int) -> bool:
     for item in todo_list:
         if item["id"] == item_id:
+            _push_undo(todo_list)
             item["done"] = False
             return True
     return False
@@ -92,6 +191,7 @@ def mark_undone(todo_list: TodoList, item_id: int) -> bool:
 def remove_item(todo_list: TodoList, item_id: int) -> bool:
     for i, item in enumerate(todo_list):
         if item["id"] == item_id:
+            _push_undo(todo_list)
             todo_list.pop(i)
             return True
     return False
@@ -100,20 +200,33 @@ def remove_item(todo_list: TodoList, item_id: int) -> bool:
 def clear_done(todo_list: TodoList) -> int:
     done_items = [item for item in todo_list if item["done"]]
     count = len(done_items)
+    if count > 0:
+        _push_undo(todo_list)
     for item in done_items:
         todo_list.remove(item)
     return count
 
 
-def search_items(todo_list: TodoList, query: str) -> List[dict]:
+def search_items(todo_list: TodoList, query: str, search_tags: bool = False) -> List[dict]:
     query_lower = query.lower()
-    return [item for item in todo_list if query_lower in item["task"].lower()]
+    results = []
+    for item in todo_list:
+        if query_lower in item["task"].lower():
+            results.append(item)
+            continue
+        if search_tags and "tags" in item:
+            for tag in item["tags"]:
+                if query_lower in tag:
+                    results.append(item)
+                    break
+    return results
 
 
 def list_items(
     todo_list: TodoList,
     filter_by: str = "all",
     sort_by: str = "id",
+    tag_filter: Optional[str] = None,
     color: bool = True,
 ) -> None:
     if not todo_list:
@@ -133,6 +246,10 @@ def list_items(
             if not i["done"] and i.get("due") and i["due"] < today
         ]
 
+    if tag_filter is not None:
+        tag_lower = tag_filter.lower()
+        filtered = [i for i in filtered if tag_lower in [t.lower() for t in i.get("tags", [])]]
+
     if sort_by == "priority":
         filtered = sorted(filtered, key=lambda i: _PRIORITY_ORDER.get(i.get("priority", "medium"), 1))
     elif sort_by == "due":
@@ -142,6 +259,8 @@ def list_items(
         )
     elif sort_by == "status":
         filtered = sorted(filtered, key=lambda i: (i["done"], i["id"]))
+    elif sort_by == "created":
+        filtered = sorted(filtered, key=lambda i: i.get("created_at", ""), reverse=True)
 
     if not filtered:
         print("No matching items found.")
@@ -152,11 +271,13 @@ def list_items(
         priority = item.get("priority", "medium")
         due = item.get("due", "")
         created = item.get("created_at", "")
+        tags = item.get("tags", [])
 
         priority_badge = f"[{priority[0].upper()}]" if priority else ""
         due_str = f" (due: {due})" if due else ""
+        tag_str = f" {{{','.join(tags)}}}" if tags else ""
 
-        line = f"  [{status}] {item['id']}: {item['task']} {priority_badge}{due_str}"
+        line = f"  [{status}] {item['id']}: {item['task']} {priority_badge}{due_str}{tag_str}"
         if created:
             line += f"  {created}"
 
@@ -167,6 +288,8 @@ def list_items(
                 print(f"{_ANSI_RED}{line}{_ANSI_RESET}")
             elif priority == "low":
                 print(f"{_ANSI_CYAN}{line}{_ANSI_RESET}")
+            elif tag_filter and tag_lower in [t.lower() for t in tags]:
+                print(f"{_ANSI_MAGENTA}{line}{_ANSI_RESET}")
             else:
                 print(line)
         else:
@@ -189,6 +312,11 @@ def stats(todo_list: TodoList) -> None:
         if p in priority_counts:
             priority_counts[p] += 1
 
+    all_tags = {}
+    for i in todo_list:
+        for t in i.get("tags", []):
+            all_tags[t] = all_tags.get(t, 0) + 1
+
     print(f"{_ANSI_BOLD}To-Do Stats{_ANSI_RESET}")
     print(f"  Total:    {total}")
     print(f"  Done:     {_ANSI_GREEN}{done}{_ANSI_RESET}")
@@ -197,6 +325,36 @@ def stats(todo_list: TodoList) -> None:
     print(f"  High:     {_ANSI_RED}{priority_counts['high']}{_ANSI_RESET}  "
           f"Medium: {priority_counts['medium']}  "
           f"Low: {_ANSI_CYAN}{priority_counts['low']}{_ANSI_RESET}")
+    if all_tags:
+        print(f"  Tags:     {', '.join(f'{k}({v})' for k, v in sorted(all_tags.items()))}")
+
+
+def export_todo_list(todo_list: TodoList, filepath: str, fmt: str = "csv") -> None:
+    if fmt == "csv":
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "task", "done", "priority", "due", "tags", "created_at"])
+            for item in todo_list:
+                writer.writerow([
+                    item["id"],
+                    item["task"],
+                    item["done"],
+                    item.get("priority", "medium"),
+                    item.get("due", ""),
+                    ",".join(item.get("tags", [])),
+                    item.get("created_at", ""),
+                ])
+    elif fmt == "txt":
+        with open(filepath, "w") as f:
+            for item in todo_list:
+                status = "DONE" if item["done"] else "TODO"
+                tags = ",".join(item.get("tags", []))
+                f.write(f"[{status}] {item['id']}: {item['task']} | priority={item.get('priority', 'medium')} | due={item.get('due', 'none')} | tags={tags}\n")
+    elif fmt == "json":
+        with open(filepath, "w") as f:
+            json.dump(todo_list, f, indent=2)
+    else:
+        raise ValueError(f"Unknown export format: {fmt}. Supported: csv, txt, json")
 
 
 def save_todo_list(todo_list: TodoList, filepath: str = _DEFAULT_FILE) -> None:
@@ -218,6 +376,7 @@ def load_todo_list(filepath: str = _DEFAULT_FILE) -> TodoList:
         item.setdefault("priority", "medium")
         item.setdefault("due", None)
         item.setdefault("created_at", "")
+        item.setdefault("tags", [])
         validated.append(item)
     if validated:
         _next_id = max(item["id"] for item in validated) + 1
@@ -237,13 +396,15 @@ def main():
     add_p.add_argument("task", help="Task description")
     add_p.add_argument("-p", "--priority", choices=_VALID_PRIORITIES, default="medium", help="Task priority (default: medium)")
     add_p.add_argument("-d", "--due", help="Due date in YYYY-MM-DD format")
+    add_p.add_argument("-t", "--tags", help="Comma-separated tags (max 5)")
 
     list_p = sub.add_parser("list", help="List all tasks")
     list_p.add_argument("--no-color", action="store_true", help="Disable colored output")
 
     ls_p = sub.add_parser("ls", help="List tasks with filtering and sorting")
     ls_p.add_argument("-f", "--filter", choices=["all", "done", "pending", "overdue"], default="all", help="Filter tasks")
-    ls_p.add_argument("-s", "--sort", choices=["id", "priority", "due", "status"], default="id", help="Sort tasks")
+    ls_p.add_argument("-s", "--sort", choices=["id", "priority", "due", "status", "created"], default="id", help="Sort tasks")
+    ls_p.add_argument("-t", "--tag", help="Filter by tag")
     ls_p.add_argument("--no-color", action="store_true", help="Disable colored output")
 
     done_p = sub.add_parser("done", help="Mark a task as done")
@@ -261,20 +422,40 @@ def main():
     edit_p.add_argument("id", type=int, help="Task ID to edit")
     edit_p.add_argument("task", help="New task description")
 
+    priority_p = sub.add_parser("priority", help="Set task priority")
+    priority_p.add_argument("id", type=int, help="Task ID")
+    priority_p.add_argument("priority", choices=_VALID_PRIORITIES, help="New priority")
+
+    due_p = sub.add_parser("due", help="Set or remove due date")
+    due_p.add_argument("id", type=int, help="Task ID")
+    due_p.add_argument("date", nargs="?", default=None, help="Due date (YYYY-MM-DD) or omit to clear")
+
+    tag_p = sub.add_parser("tag", help="Set tags on a task")
+    tag_p.add_argument("id", type=int, help="Task ID")
+    tag_p.add_argument("tags", help="Comma-separated tags (max 5)")
+
     search_p = sub.add_parser("search", help="Search tasks by keyword")
     search_p.add_argument("query", help="Search keyword")
+    search_p.add_argument("--tags", action="store_true", help="Also search in tags")
 
     sub.add_parser("stats", help="Show to-do list statistics")
+
+    export_p = sub.add_parser("export", help="Export todo list to file")
+    export_p.add_argument("filepath", help="Output file path")
+    export_p.add_argument("-f", "--format", choices=["csv", "txt", "json"], default="csv", help="Export format")
+
+    sub.add_parser("undo", help="Undo last change")
 
     args = parser.parse_args()
     todos = load_todo_list()
 
     if args.command == "add":
         try:
-            add_item(todos, args.task, priority=args.priority, due=args.due)
+            add_item(todos, args.task, priority=args.priority, due=args.due, tags=args.tags)
             save_todo_list(todos)
             due_str = f" (due: {args.due})" if args.due else ""
-            print(f"Added: {args.task.strip()} [{args.priority}]{due_str}")
+            tag_str = f" [{args.tags}]" if args.tags else ""
+            print(f"Added: {args.task.strip()} [{args.priority}]{due_str}{tag_str}")
         except ValueError as e:
             print(f"Error: {e}")
             sys.exit(1)
@@ -282,13 +463,15 @@ def main():
         color = True
         filter_by = "all"
         sort_by = "id"
+        tag_filter = None
         if args.command == "ls":
             filter_by = args.filter
             sort_by = args.sort
             color = not args.no_color
+            tag_filter = args.tag
         elif args.command == "list":
             color = not args.no_color
-        list_items(todos, filter_by=filter_by, sort_by=sort_by, color=color)
+        list_items(todos, filter_by=filter_by, sort_by=sort_by, tag_filter=tag_filter, color=color)
     elif args.command == "done":
         if mark_done(todos, args.id):
             save_todo_list(todos)
@@ -321,12 +504,45 @@ def main():
         except ValueError as e:
             print(f"Error: {e}")
             sys.exit(1)
+    elif args.command == "priority":
+        try:
+            if set_priority(todos, args.id, args.priority):
+                save_todo_list(todos)
+                print(f"Set priority of {args.id} to {args.priority}.")
+            else:
+                print(f"Error: No item with ID {args.id}")
+                sys.exit(1)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+    elif args.command == "due":
+        try:
+            if set_due(todos, args.id, args.date):
+                save_todo_list(todos)
+                print(f"Set due date of {args.id} to {args.date}.")
+            else:
+                print(f"Error: No item with ID {args.id}")
+                sys.exit(1)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+    elif args.command == "tag":
+        try:
+            if set_tags(todos, args.id, args.tags):
+                save_todo_list(todos)
+                print(f"Set tags of {args.id} to: {args.tags}.")
+            else:
+                print(f"Error: No item with ID {args.id}")
+                sys.exit(1)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
     elif args.command == "clear-done":
         count = clear_done(todos)
         save_todo_list(todos)
         print(f"Cleared {count} completed task(s).")
     elif args.command == "search":
-        results = search_items(todos, args.query)
+        results = search_items(todos, args.query, search_tags=args.tags)
         if results:
             print(f"Found {len(results)} result(s):")
             list_items(results, color=True)
@@ -334,6 +550,19 @@ def main():
             print(f"No results for '{args.query}'.")
     elif args.command == "stats":
         stats(todos)
+    elif args.command == "export":
+        try:
+            export_todo_list(todos, args.filepath, fmt=args.format)
+            print(f"Exported {len(todos)} item(s) to {args.filepath} ({args.format}).")
+        except (ValueError, OSError) as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+    elif args.command == "undo":
+        if undo(todos):
+            save_todo_list(todos)
+            print("Undone last action.")
+        else:
+            print("Nothing to undo.")
     else:
         parser.print_help()
 
