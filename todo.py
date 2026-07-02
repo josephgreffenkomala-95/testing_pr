@@ -60,12 +60,15 @@ def add_item(
     return todo_list
 
 
-def edit_item(todo_list: TodoList, item_id: int, new_task: str) -> bool:
-    if not new_task.strip():
+def edit_item(todo_list: TodoList, item_id: int, new_task: str, max_length: int = 200) -> bool:
+    stripped = new_task.strip()
+    if not stripped:
         raise ValueError("Item must not be empty or whitespace-only")
+    if len(stripped) > max_length:
+        raise ValueError(f"Item exceeds maximum length of {max_length} characters")
     for item in todo_list:
         if item["id"] == item_id:
-            item["task"] = new_task.strip()
+            item["task"] = stripped
             return True
     return False
 
@@ -207,9 +210,18 @@ def load_todo_list(filepath: str = _DEFAULT_FILE) -> TodoList:
         return []
     with open(filepath, "r") as f:
         data = json.load(f)
-    if data:
-        _next_id = max(item["id"] for item in data) + 1
-    return data
+    _REQUIRED_KEYS = {"id", "task", "done"}
+    validated = []
+    for item in data:
+        if not isinstance(item, dict) or not _REQUIRED_KEYS.issubset(item):
+            continue
+        item.setdefault("priority", "medium")
+        item.setdefault("due", None)
+        item.setdefault("created_at", "")
+        validated.append(item)
+    if validated:
+        _next_id = max(item["id"] for item in validated) + 1
+    return validated
 
 
 def main():
@@ -226,7 +238,8 @@ def main():
     add_p.add_argument("-p", "--priority", choices=_VALID_PRIORITIES, default="medium", help="Task priority (default: medium)")
     add_p.add_argument("-d", "--due", help="Due date in YYYY-MM-DD format")
 
-    sub.add_parser("list", help="List all tasks")
+    list_p = sub.add_parser("list", help="List all tasks")
+    list_p.add_argument("--no-color", action="store_true", help="Disable colored output")
 
     ls_p = sub.add_parser("ls", help="List tasks with filtering and sorting")
     ls_p.add_argument("-f", "--filter", choices=["all", "done", "pending", "overdue"], default="all", help="Filter tasks")
@@ -272,6 +285,8 @@ def main():
         if args.command == "ls":
             filter_by = args.filter
             sort_by = args.sort
+            color = not args.no_color
+        elif args.command == "list":
             color = not args.no_color
         list_items(todos, filter_by=filter_by, sort_by=sort_by, color=color)
     elif args.command == "done":

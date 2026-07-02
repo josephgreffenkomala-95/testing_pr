@@ -157,6 +157,19 @@ class TestEditItem(unittest.TestCase):
         with self.assertRaises(ValueError):
             edit_item(todos, todos[0]["id"], "")
 
+    def test_edit_rejects_too_long_string(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        with self.assertRaises(ValueError):
+            edit_item(todos, todos[0]["id"], "x" * 201)
+
+    def test_edit_allows_max_length_string(self):
+        todos = create_todo_list()
+        add_item(todos, "Task")
+        result = edit_item(todos, todos[0]["id"], "x" * 200)
+        self.assertTrue(result)
+        self.assertEqual(todos[0]["task"], "x" * 200)
+
 
 class TestMarkDone(unittest.TestCase):
     def test_mark_valid_id(self):
@@ -464,6 +477,28 @@ class TestPersistence(unittest.TestCase):
         loaded = load_todo_list(self.test_file)
         self.assertTrue(loaded[0]["done"])
         self.assertFalse(loaded[1]["done"])
+
+    def test_load_skips_items_missing_required_keys(self):
+        with open(self.test_file, "w") as f:
+            json.dump([
+                {"id": 0, "task": "Valid task", "done": False},
+                {"id": 1, "task": "Missing done"},
+                {"task": "Missing id and done"},
+                "not a dict",
+            ], f)
+        loaded = load_todo_list(self.test_file)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0]["task"], "Valid task")
+
+    def test_load_defaults_missing_optional_fields(self):
+        with open(self.test_file, "w") as f:
+            json.dump([
+                {"id": 0, "task": "Old task", "done": False}
+            ], f)
+        loaded = load_todo_list(self.test_file)
+        self.assertEqual(loaded[0]["priority"], "medium")
+        self.assertIsNone(loaded[0]["due"])
+        self.assertEqual(loaded[0]["created_at"], "")
 
 
 if __name__ == "__main__":
