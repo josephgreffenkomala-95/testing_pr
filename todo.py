@@ -85,59 +85,50 @@ def load_todo_list(filepath: str = _DEFAULT_FILE) -> TodoList:
     return data
 
 
-if __name__ == "__main__":
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="todo", description="Simple to-do list CLI")
+    sub = parser.add_subparsers(dest="command")
+
+    add_p = sub.add_parser("add", help="Add a new task")
+    add_p.add_argument("task", help="Task description")
+
+    sub.add_parser("list", help="List all tasks")
+
+    done_p = sub.add_parser("done", help="Mark a task as done")
+    done_p.add_argument("id", type=int, help="Task ID to mark done")
+
+    rm_p = sub.add_parser("remove", help="Remove a task")
+    rm_p.add_argument("id", type=int, help="Task ID to remove")
+
+    args = parser.parse_args()
     todos = load_todo_list()
 
-    while True:
-        print("\n--- To-Do List ---")
-        print("1. Add item")
-        print("2. List items")
-        print("3. Mark item done")
-        print("4. Remove item")
-        print("5. Quit")
-        choice = input("Choose an option: ").strip()
-
-        if choice == "1":
-            task = input("Enter task: ").strip()
-            try:
-                add_item(todos, task)
-                save_todo_list(todos)
-                print(f"Added: {task}")
-            except ValueError as e:
-                print(f"Error: {e}")
-        elif choice == "2":
-            list_items(todos)
-        elif choice == "3":
-            if not todos:
-                print("No items in the to-do list.")
-                continue
-            list_items(todos)
-            raw = input("Enter item ID to mark done: ").strip()
-            if raw.isdigit():
-                if mark_done(todos, int(raw)):
-                    save_todo_list(todos)
-                    print("Item marked as done.")
-                else:
-                    print("Invalid item ID.")
-            else:
-                print("Invalid input.")
-        elif choice == "4":
-            if not todos:
-                print("No items in the to-do list.")
-                continue
-            list_items(todos)
-            raw = input("Enter item ID to remove: ").strip()
-            if raw.isdigit():
-                if remove_item(todos, int(raw)):
-                    save_todo_list(todos)
-                    print("Item removed.")
-                else:
-                    print("Invalid item ID.")
-            else:
-                print("Invalid input.")
-        elif choice == "5":
+    if args.command == "add":
+        try:
+            add_item(todos, args.task)
             save_todo_list(todos)
-            print("Goodbye!")
-            break
+            print(f"Added: {args.task.strip()}")
+        except ValueError as e:
+            print(f"Error: {e}")
+    elif args.command == "list":
+        list_items(todos)
+    elif args.command == "done":
+        if mark_done(todos, args.id):
+            save_todo_list(todos)
+            print(f"Marked {args.id} as done.")
         else:
-            print("Invalid option.")
+            print(f"Error: No item with ID {args.id}")
+    elif args.command == "remove":
+        if remove_item(todos, args.id):
+            save_todo_list(todos)
+            print(f"Removed item {args.id}.")
+        else:
+            print(f"Error: No item with ID {args.id}")
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
