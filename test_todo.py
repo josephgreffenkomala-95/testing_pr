@@ -782,7 +782,7 @@ class TestTui(unittest.TestCase):
         add_item(todos, "Task 1")
         screen = FakeScreen([ord(" "), ord("q")])
 
-        with patch("todo.curses.curs_set", return_value=None):
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
             changed = todo._tui_main(screen, todos)
 
         self.assertTrue(changed)
@@ -794,7 +794,52 @@ class TestTui(unittest.TestCase):
         add_item(todos, "Task 2")
         screen = FakeScreen([ord("x"), ord("q")])
 
-        with patch("todo.curses.curs_set", return_value=None):
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["task"], "Task 2")
+
+    def test_tui_main_adds_item_from_prompt(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        screen = FakeScreen([ord("a"), ord("N"), ord("e"), ord("w"), 10, ord("q")])
+
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertEqual(len(todos), 2)
+        self.assertEqual(todos[1]["task"], "New")
+
+    def test_tui_main_uses_mouse_for_selection_and_toggle(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        screen = FakeScreen([curses.KEY_MOUSE, curses.KEY_MOUSE, ord("q")])
+
+        mouse_event = (0, 0, 5, 0, curses.BUTTON1_CLICKED)
+
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0), patch(
+            "todo.curses.getmouse", side_effect=[mouse_event, mouse_event]
+        ):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertTrue(todos[1]["done"])
+
+    def test_tui_main_uses_mouse_for_removal(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        screen = FakeScreen([curses.KEY_MOUSE, ord("q")])
+
+        mouse_event = (0, 0, 4, 0, curses.BUTTON3_CLICKED)
+
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0), patch(
+            "todo.curses.getmouse", return_value=mouse_event
+        ):
             changed = todo._tui_main(screen, todos)
 
         self.assertTrue(changed)

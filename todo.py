@@ -69,7 +69,7 @@ def _tui_render(stdscr, todo_list, selected_index, message=""):
     height, width = stdscr.getmaxyx()
 
     title = "TODO LIST"
-    help_line = "j/k or arrows move | space toggle | x remove | q quit"
+    help_line = "j/k or arrows move | space toggle | x remove | a add | mouse select/toggle | q quit"
     status = f"{len(todo_list)} item{'s' if len(todo_list) != 1 else ''}"
 
     _tui_addstr(stdscr, 0, 0, title, curses.A_BOLD)
@@ -78,7 +78,7 @@ def _tui_render(stdscr, todo_list, selected_index, message=""):
     _tui_addstr(stdscr, 2, 0, message or "Select a task to manage it.", curses.A_BOLD if message else curses.A_DIM)
 
     if not todo_list:
-        _tui_addstr(stdscr, 4, 0, "No items yet. Add tasks from the CLI, then reopen the TUI.", curses.A_DIM)
+        _tui_addstr(stdscr, 4, 0, "No items yet. Press a to add one from the TUI.", curses.A_DIM)
         stdscr.refresh()
         return
 
@@ -98,6 +98,59 @@ def _tui_render(stdscr, todo_list, selected_index, message=""):
     stdscr.refresh()
 
 
+def _tui_prompt(stdscr, prompt):
+    height, width = stdscr.getmaxyx()
+    y = max(0, height - 1)
+    buffer = []
+
+    while True:
+        _tui_addstr(stdscr, y, 0, " " * max(0, width - 1))
+        _tui_addstr(stdscr, y, 0, f"{prompt}{''.join(buffer)}", curses.A_BOLD)
+        stdscr.refresh()
+        key = stdscr.getch()
+
+        if key in (10, 13, curses.KEY_ENTER):
+            return "".join(buffer).strip()
+        if key in (27,):
+            return None
+        if key in (curses.KEY_BACKSPACE, 127, 8):
+            if buffer:
+                buffer.pop()
+            continue
+        if 32 <= key <= 126:
+            buffer.append(chr(key))
+
+
+def _tui_handle_mouse(todo_list, selected_index):
+    try:
+        _, _, y, _, bstate = curses.getmouse()
+    except curses.error:
+        return selected_index, False, ""
+
+    row = y - 4
+    if row < 0 or row >= len(todo_list):
+        return selected_index, False, ""
+
+    item_id = todo_list[row]["id"]
+    if bstate & curses.BUTTON3_CLICKED:
+        if remove_item(todo_list, item_id):
+            if selected_index >= len(todo_list):
+                selected_index = max(0, len(todo_list) - 1)
+            return selected_index, True, f"Removed item {item_id}."
+        return selected_index, False, ""
+
+    if bstate & curses.BUTTON1_CLICKED:
+        if row != selected_index:
+            return row, False, f"Selected item {item_id}."
+        if todo_list[row]["done"]:
+            mark_undone(todo_list, item_id)
+            return selected_index, True, f"Marked {item_id} as pending."
+        mark_done(todo_list, item_id)
+        return selected_index, True, f"Marked {item_id} as done."
+
+    return selected_index, False, ""
+
+
 def _tui_main(stdscr, todo_list):
     changed = False
     selected_index = 0
@@ -109,6 +162,11 @@ def _tui_main(stdscr, todo_list):
         pass
 
     stdscr.keypad(True)
+    try:
+        mouse_events = getattr(curses, "ALL_MOUSE_EVENTS", 0) | getattr(curses, "REPORT_MOUSE_POSITION", 0)
+        curses.mousemask(mouse_events)
+    except (AttributeError, curses.error):
+        pass
 
     while True:
         if todo_list and selected_index >= len(todo_list):
@@ -129,6 +187,32 @@ def _tui_main(stdscr, todo_list):
         if key in (curses.KEY_DOWN, ord("j")):
             if todo_list:
                 selected_index = min(len(todo_list) - 1, selected_index + 1)
+            continue
+
+        if key in (ord("a"), ord("A")):
+            try:
+                new_task = _tui_prompt(stdscr, "New task: ")
+            except curses.error:
+                message = "Unable to open the add prompt."
+                continue
+            if new_task is None:
+                message = "Add cancelled."
+                continue
+            try:
+                add_item(todo_list, new_task)
+            except ValueError as exc:
+                message = f"Error: {exc}"
+                continue
+            selected_index = len(todo_list) - 1
+            changed = True
+            message = f"Added item {todo_list[selected_index]['id']}."
+            continue
+
+        if key == curses.KEY_MOUSE:
+            selected_index, mouse_changed, mouse_message = _tui_handle_mouse(todo_list, selected_index)
+            if mouse_message:
+                message = mouse_message
+            changed = changed or mouse_changed
             continue
 
         if not todo_list:

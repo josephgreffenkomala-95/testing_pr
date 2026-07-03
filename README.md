@@ -37,4 +37,4 @@ python3 todo.py clear-done
 python3 todo.py tui
 ```
 
-Use `j`/`k` or the arrow keys to move, `space` to toggle a task, `x` to remove it, and `q` to quit.
+Use `j`/`k` or the arrow keys to move, `space` to toggle a task, `x` to remove it, `a` to add a task, click to select or toggle, right-click to remove, and `q` to quit.
