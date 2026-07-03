@@ -801,6 +801,26 @@ class TestTui(unittest.TestCase):
         self.assertEqual(len(todos), 1)
         self.assertEqual(todos[0]["task"], "Task 2")
 
+    def test_tui_render_shows_header_and_empty_state(self):
+        screen = FakeScreen([])
+
+        todo._tui_render(screen, [], 0, message="Saved.")
+
+        rendered_text = [args[2] for args in screen.added if len(args) >= 3]
+        self.assertTrue(any("TODO LIST" in text for text in rendered_text))
+        self.assertTrue(any("Saved." in text for text in rendered_text))
+        self.assertTrue(any("No items yet" in text for text in rendered_text))
+
+    def test_tui_render_highlights_selected_item(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1", due="2025-12-31", tags="work")
+        screen = FakeScreen([])
+
+        todo._tui_render(screen, todos, 0)
+
+        self.assertTrue(any(len(args) >= 4 and args[3] == curses.A_REVERSE for args in screen.added))
+        self.assertTrue(any(len(args) >= 3 and args[2].startswith("> ") for args in screen.added))
+
 
 if __name__ == "__main__":
     unittest.main()

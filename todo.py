@@ -48,27 +48,52 @@ def _tui_item_line(item):
     return " ".join(parts)
 
 
+def _tui_addstr(stdscr, y, x, text, attr=None):
+    height, width = stdscr.getmaxyx()
+    if y < 0 or y >= height:
+        return
+    if x >= width:
+        return
+    clipped = text[: max(0, width - x - 1)]
+    try:
+        if attr is None:
+            stdscr.addstr(y, x, clipped)
+        else:
+            stdscr.addstr(y, x, clipped, attr)
+    except curses.error:
+        pass
+
+
 def _tui_render(stdscr, todo_list, selected_index, message=""):
     stdscr.clear()
     height, width = stdscr.getmaxyx()
 
-    header = "To-Do TUI: q quit | space toggle | x remove | j/k or arrows move"
-    stdscr.addstr(0, 0, header[: max(0, width - 1)])
-    if message:
-        stdscr.addstr(1, 0, message[: max(0, width - 1)])
+    title = "TODO LIST"
+    help_line = "j/k or arrows move | space toggle | x remove | q quit"
+    status = f"{len(todo_list)} item{'s' if len(todo_list) != 1 else ''}"
+
+    _tui_addstr(stdscr, 0, 0, title, curses.A_BOLD)
+    _tui_addstr(stdscr, 0, max(0, width - len(status) - 1), status, curses.A_DIM)
+    _tui_addstr(stdscr, 1, 0, help_line, curses.A_DIM)
+    _tui_addstr(stdscr, 2, 0, message or "Select a task to manage it.", curses.A_BOLD if message else curses.A_DIM)
 
     if not todo_list:
-        stdscr.addstr(3, 0, "No items in the to-do list.")
+        _tui_addstr(stdscr, 4, 0, "No items yet. Add tasks from the CLI, then reopen the TUI.", curses.A_DIM)
         stdscr.refresh()
         return
 
-    visible_rows = max(0, height - 4)
+    visible_rows = max(0, height - 5)
     for row, item in enumerate(todo_list[:visible_rows]):
-        line = _tui_item_line(item)
+        line = f"> {_tui_item_line(item)}" if row == selected_index else f"  {_tui_item_line(item)}"
+        attr = curses.A_REVERSE if row == selected_index else None
+        if item.get("done") and attr is None:
+            attr = curses.A_DIM
+        elif item.get("done"):
+            attr |= curses.A_DIM
         if row == selected_index:
-            stdscr.addstr(3 + row, 0, line[: max(0, width - 1)], curses.A_REVERSE)
+            _tui_addstr(stdscr, 4 + row, 0, line, attr)
         else:
-            stdscr.addstr(3 + row, 0, line[: max(0, width - 1)])
+            _tui_addstr(stdscr, 4 + row, 0, line, attr)
 
     stdscr.refresh()
 

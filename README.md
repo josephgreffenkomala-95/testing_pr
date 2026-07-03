@@ -30,3 +30,11 @@ python3 todo.py search groceries
 python3 todo.py stats
 python3 todo.py clear-done
 ```
+
+### Interactive TUI
+
+```
+python3 todo.py tui
+```
+
+Use `j`/`k` or the arrow keys to move, `space` to toggle a task, `x` to remove it, and `q` to quit.
