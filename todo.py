@@ -45,7 +45,7 @@ def _tui_item_line(item):
         parts.append(f"(due: {due})")
     if tags:
         parts.append(f"{{{','.join(tags)}}}")
-    return " ".join(parts)
+    return " ".join(parts), priority
 
 
 def _tui_addstr(stdscr, y, x, text, attr=None):
@@ -64,16 +64,16 @@ def _tui_addstr(stdscr, y, x, text, attr=None):
         pass
 
 
-def _tui_render(stdscr, todo_list, selected_index, message=""):
+def _tui_render(stdscr, todo_list, selected_index, scroll_offset=0, message=""):
     stdscr.clear()
     height, width = stdscr.getmaxyx()
 
     title = "TODO LIST"
-    help_line = "j/k or arrows move | space toggle | x remove | a add | mouse select/toggle | q quit"
-    status = f"{len(todo_list)} item{'s' if len(todo_list) != 1 else ''}"
+    help_line = "j/k or arrows move | space toggle | x remove | a add | e edit | mouse select/toggle | q quit"
+    header = f"{len(todo_list)} item{'s' if len(todo_list) != 1 else ''}"
 
     _tui_addstr(stdscr, 0, 0, title, curses.A_BOLD)
-    _tui_addstr(stdscr, 0, max(0, width - len(status) - 1), status, curses.A_DIM)
+    _tui_addstr(stdscr, 0, max(0, width - len(header) - 1), header, curses.A_DIM)
     _tui_addstr(stdscr, 1, 0, help_line, curses.A_DIM)
     _tui_addstr(stdscr, 2, 0, message or "Select a task to manage it.", curses.A_BOLD if message else curses.A_DIM)
 
@@ -82,18 +82,41 @@ def _tui_render(stdscr, todo_list, selected_index, message=""):
         stdscr.refresh()
         return
 
-    visible_rows = max(0, height - 5)
-    for row, item in enumerate(todo_list[:visible_rows]):
-        line = f"> {_tui_item_line(item)}" if row == selected_index else f"  {_tui_item_line(item)}"
-        attr = curses.A_REVERSE if row == selected_index else None
-        if item.get("done") and attr is None:
-            attr = curses.A_DIM
-        elif item.get("done"):
-            attr |= curses.A_DIM
-        if row == selected_index:
-            _tui_addstr(stdscr, 4 + row, 0, line, attr)
+    visible_rows = max(0, height - 6)
+    end_index = min(scroll_offset + visible_rows, len(todo_list))
+    display_items = todo_list[scroll_offset:end_index]
+
+    for row, item in enumerate(display_items):
+        actual_row = 4 + row
+        line_text, priority = _tui_item_line(item)
+        prefix = "> " if (scroll_offset + row) == selected_index else "  "
+        line = prefix + line_text
+
+        if item["done"]:
+            color_attr = curses.A_DIM
+        elif priority == "high":
+            color_attr = curses.color_pair(1)
+        elif priority == "low":
+            color_attr = curses.color_pair(2)
         else:
-            _tui_addstr(stdscr, 4 + row, 0, line, attr)
+            color_attr = 0
+
+        if (scroll_offset + row) == selected_index:
+            attr = curses.A_REVERSE | (color_attr if color_attr else 0)
+        else:
+            attr = color_attr if color_attr else None
+
+        _tui_addstr(stdscr, actual_row, 0, line, attr)
+
+    done_count = sum(1 for item in todo_list if item["done"])
+    total = len(todo_list)
+    pct = int(done_count / total * 100) if total else 0
+    progress = f"Progress: {done_count}/{total} done ({pct}%)"
+
+    if scroll_offset > 0:
+        _tui_addstr(stdscr, height - 2, 0, "↑ scroll up", curses.A_DIM)
+
+    _tui_addstr(stdscr, height - 1, 0, progress, curses.A_DIM)
 
     stdscr.refresh()
 
@@ -154,6 +177,7 @@ def _tui_handle_mouse(todo_list, selected_index):
 def _tui_main(stdscr, todo_list):
     changed = False
     selected_index = 0
+    scroll_offset = 0
     message = ""
 
     try:
@@ -162,6 +186,11 @@ def _tui_main(stdscr, todo_list):
         pass
 
     stdscr.keypad(True)
+
+    curses.start_color()
+    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)
+
     try:
         mouse_events = getattr(curses, "ALL_MOUSE_EVENTS", 0) | getattr(curses, "REPORT_MOUSE_POSITION", 0)
         curses.mousemask(mouse_events)
@@ -172,12 +201,23 @@ def _tui_main(stdscr, todo_list):
         if todo_list and selected_index >= len(todo_list):
             selected_index = len(todo_list) - 1
 
-        _tui_render(stdscr, todo_list, selected_index, message=message)
+        height, _ = stdscr.getmaxyx()
+        visible_rows = max(0, height - 6)
+        if selected_index < scroll_offset:
+            scroll_offset = selected_index
+        if selected_index >= scroll_offset + visible_rows:
+            scroll_offset = selected_index - visible_rows + 1
+
+        _tui_render(stdscr, todo_list, selected_index, scroll_offset=scroll_offset, message=message)
         message = ""
         key = stdscr.getch()
 
         if key in (ord("q"), ord("Q")):
             return changed
+
+        if key == curses.KEY_RESIZE:
+            stdscr.clear()
+            continue
 
         if key in (curses.KEY_UP, ord("k")):
             if todo_list:
@@ -215,6 +255,26 @@ def _tui_main(stdscr, todo_list):
             changed = changed or mouse_changed
             continue
 
+        if key in (ord("e"), ord("E")):
+            if not todo_list:
+                continue
+            try:
+                new_text = _tui_prompt(stdscr, f"Edit item {todo_list[selected_index]['id']}: ")
+            except curses.error:
+                message = "Unable to open the edit prompt."
+                continue
+            if new_text is None:
+                message = "Edit cancelled."
+                continue
+            try:
+                edit_item(todo_list, todo_list[selected_index]["id"], new_text)
+            except ValueError as exc:
+                message = f"Error: {exc}"
+                continue
+            changed = True
+            message = f"Updated item {todo_list[selected_index]['id']}."
+            continue
+
         if not todo_list:
             continue
 
@@ -229,11 +289,19 @@ def _tui_main(stdscr, todo_list):
                 message = f"Marked {item_id} as done."
             changed = True
         elif key in (ord("x"), ord("X")):
-            if remove_item(todo_list, item_id):
-                changed = True
-                message = f"Removed item {item_id}."
-                if selected_index >= len(todo_list):
-                    selected_index = max(0, len(todo_list) - 1)
+            try:
+                confirm = _tui_prompt(stdscr, f"Remove item {item_id}? (y/N): ")
+            except curses.error:
+                message = "Unable to open confirmation prompt."
+                continue
+            if confirm and confirm.lower() == "y":
+                if remove_item(todo_list, item_id):
+                    changed = True
+                    message = f"Removed item {item_id}."
+                    if selected_index >= len(todo_list):
+                        selected_index = max(0, len(todo_list) - 1)
+            else:
+                message = "Removal cancelled."
 
 
 def run_tui(todo_list):
