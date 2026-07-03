@@ -856,6 +856,19 @@ class TestTui(unittest.TestCase):
         self.assertTrue(any("Saved." in text for text in rendered_text))
         self.assertTrue(any("No items yet" in text for text in rendered_text))
 
+    def test_tui_render_shows_footer_stats(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        mark_done(todos, todos[0]["id"])
+        screen = FakeScreen([])
+
+        todo._tui_render(screen, todos, 0)
+
+        rendered_text = [args[2] for args in screen.added if len(args) >= 3]
+        has_stats = any("1 of 2" in text or "2 items" in text or "done" in text.lower() for text in rendered_text)
+        self.assertTrue(has_stats)
+
     def test_tui_render_highlights_selected_item(self):
         todos = create_todo_list()
         add_item(todos, "Task 1", due="2025-12-31", tags="work")
@@ -865,6 +878,51 @@ class TestTui(unittest.TestCase):
 
         self.assertTrue(any(len(args) >= 4 and args[3] == curses.A_REVERSE for args in screen.added))
         self.assertTrue(any(len(args) >= 3 and args[2].startswith("> ") for args in screen.added))
+
+    def test_tui_render_uses_priority_color_for_high(self):
+        todos = create_todo_list()
+        add_item(todos, "Urgent task", priority="high")
+        screen = FakeScreen([])
+
+        todo._tui_render(screen, todos, 0)
+
+        rendered_text = [args[2] for args in screen.added if len(args) >= 3]
+        self.assertTrue(any("[H]" in text for text in rendered_text))
+
+    def test_tui_main_edits_selected_item(self):
+        todos = create_todo_list()
+        add_item(todos, "Old task")
+        screen = FakeScreen([ord("e"), ord("N"), ord("e"), ord("w"), 10, ord("q")])
+
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertEqual(todos[0]["task"], "New")
+
+    def test_tui_main_confirms_before_remove(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        screen = FakeScreen([ord("x"), ord("y"), ord("q")])
+
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertEqual(len(todos), 1)
+
+    def test_tui_main_cancels_remove(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        screen = FakeScreen([ord("x"), ord("n"), ord("q")])
+
+        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(todos), 2)
 
 
 if __name__ == "__main__":
