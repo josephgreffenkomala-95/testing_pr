@@ -1,3 +1,4 @@
+import curses
 import json
 import os
 import unittest
@@ -23,7 +24,9 @@ from todo import (
     undo,
     save_todo_list,
     load_todo_list,
+    run_tui,
 )
+import todo
 
 
 class TestCreateTodoList(unittest.TestCase):
@@ -733,6 +736,70 @@ class TestPersistence(unittest.TestCase):
         self.assertIsNone(loaded[0]["due"])
         self.assertEqual(loaded[0]["created_at"], "")
         self.assertEqual(loaded[0]["tags"], [])
+
+
+class FakeScreen:
+    def __init__(self, keys):
+        self._keys = list(keys)
+        self.added = []
+        self.keypad_enabled = False
+
+    def clear(self):
+        pass
+
+    def getmaxyx(self):
+        return (20, 80)
+
+    def addstr(self, *args):
+        self.added.append(args)
+
+    def refresh(self):
+        pass
+
+    def keypad(self, enabled):
+        self.keypad_enabled = enabled
+
+    def getch(self):
+        if self._keys:
+            return self._keys.pop(0)
+        return ord("q")
+
+
+class TestTui(unittest.TestCase):
+    def test_run_tui_uses_curses_wrapper(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+
+        with patch("todo.curses.wrapper", autospec=True) as mock_wrapper:
+            mock_wrapper.return_value = True
+            result = run_tui(todos)
+
+        mock_wrapper.assert_called_once()
+        self.assertTrue(result)
+
+    def test_tui_main_toggles_selected_item(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        screen = FakeScreen([ord(" "), ord("q")])
+
+        with patch("todo.curses.curs_set", return_value=None):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertTrue(todos[0]["done"])
+
+    def test_tui_main_removes_selected_item(self):
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        screen = FakeScreen([ord("x"), ord("q")])
+
+        with patch("todo.curses.curs_set", return_value=None):
+            changed = todo._tui_main(screen, todos)
+
+        self.assertTrue(changed)
+        self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["task"], "Task 2")
 
 
 if __name__ == "__main__":

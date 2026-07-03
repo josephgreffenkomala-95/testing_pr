@@ -1,4 +1,5 @@
 import copy
+import curses
 import json
 import os
 import csv
@@ -31,6 +32,103 @@ _DEFAULT_CONFIG = {
 }
 
 _cached_config = None
+
+
+def _tui_item_line(item):
+    status = "x" if item["done"] else " "
+    priority = item.get("priority", "medium")
+    due = item.get("due", "")
+    tags = item.get("tags", [])
+
+    parts = [f"[{status}] {item['id']}: {item['task']} [{priority[0].upper()}]"]
+    if due:
+        parts.append(f"(due: {due})")
+    if tags:
+        parts.append(f"{{{','.join(tags)}}}")
+    return " ".join(parts)
+
+
+def _tui_render(stdscr, todo_list, selected_index, message=""):
+    stdscr.clear()
+    height, width = stdscr.getmaxyx()
+
+    header = "To-Do TUI: q quit | space toggle | x remove | j/k or arrows move"
+    stdscr.addstr(0, 0, header[: max(0, width - 1)])
+    if message:
+        stdscr.addstr(1, 0, message[: max(0, width - 1)])
+
+    if not todo_list:
+        stdscr.addstr(3, 0, "No items in the to-do list.")
+        stdscr.refresh()
+        return
+
+    visible_rows = max(0, height - 4)
+    for row, item in enumerate(todo_list[:visible_rows]):
+        line = _tui_item_line(item)
+        if row == selected_index:
+            stdscr.addstr(3 + row, 0, line[: max(0, width - 1)], curses.A_REVERSE)
+        else:
+            stdscr.addstr(3 + row, 0, line[: max(0, width - 1)])
+
+    stdscr.refresh()
+
+
+def _tui_main(stdscr, todo_list):
+    changed = False
+    selected_index = 0
+    message = ""
+
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+
+    stdscr.keypad(True)
+
+    while True:
+        if todo_list and selected_index >= len(todo_list):
+            selected_index = len(todo_list) - 1
+
+        _tui_render(stdscr, todo_list, selected_index, message=message)
+        message = ""
+        key = stdscr.getch()
+
+        if key in (ord("q"), ord("Q")):
+            return changed
+
+        if key in (curses.KEY_UP, ord("k")):
+            if todo_list:
+                selected_index = max(0, selected_index - 1)
+            continue
+
+        if key in (curses.KEY_DOWN, ord("j")):
+            if todo_list:
+                selected_index = min(len(todo_list) - 1, selected_index + 1)
+            continue
+
+        if not todo_list:
+            continue
+
+        item_id = todo_list[selected_index]["id"]
+
+        if key == ord(" "):
+            if todo_list[selected_index]["done"]:
+                mark_undone(todo_list, item_id)
+                message = f"Marked {item_id} as pending."
+            else:
+                mark_done(todo_list, item_id)
+                message = f"Marked {item_id} as done."
+            changed = True
+        elif key in (ord("x"), ord("X")):
+            if remove_item(todo_list, item_id):
+                changed = True
+                message = f"Removed item {item_id}."
+                if selected_index >= len(todo_list):
+                    selected_index = max(0, len(todo_list) - 1)
+
+
+def run_tui(todo_list):
+    return bool(curses.wrapper(_tui_main, todo_list))
 
 
 def _load_config():
@@ -422,6 +520,8 @@ def main():
     ls_p.add_argument("-t", "--tag", help="Filter by tag")
     ls_p.add_argument("--no-color", action="store_true", help="Disable colored output")
 
+    sub.add_parser("tui", help="Open an interactive terminal UI")
+
     done_p = sub.add_parser("done", help="Mark a task as done")
     done_p.add_argument("id", type=int, help="Task ID to mark done")
 
@@ -565,6 +665,13 @@ def main():
             print(f"No results for '{args.query}'.")
     elif args.command == "stats":
         stats(todos)
+    elif args.command == "tui":
+        try:
+            if run_tui(todos):
+                save_todo_list(todos)
+        except curses.error as e:
+            print(f"Error: {e}")
+            sys.exit(1)
     elif args.command == "export":
         try:
             export_todo_list(todos, args.filepath, fmt=args.format)
