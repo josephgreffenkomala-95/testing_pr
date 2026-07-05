@@ -11,6 +11,8 @@ from .core import (
     remove_item,
 )
 
+_SIDEBAR_WIDTH = 22
+
 
 def _tui_item_line(item):
     status = "x" if item["done"] else " "
@@ -58,10 +60,56 @@ def _tui_is_overdue(item):
     return due < datetime.now().strftime("%Y-%m-%d")
 
 
-def _tui_render(stdscr, todo_list, selected_index, scroll_offset=0, message="",
-                filter_by="all", sort_by="id"):
+def _tui_render_sidebar(stdscr, todo_list, filter_by, sort_by, search_query, height):
+    total = len(todo_list)
+    done_count = sum(1 for i in todo_list if i["done"])
+    pending_count = total - done_count
+    today = datetime.now().strftime("%Y-%m-%d")
+    overdue_count = sum(1 for i in todo_list if not i["done"] and i.get("due") and i["due"] < today)
+    high = sum(1 for i in todo_list if i.get("priority") == "high")
+    medium = sum(1 for i in todo_list if i.get("priority") == "medium")
+    low = sum(1 for i in todo_list if i.get("priority") == "low")
+
+    sw = _SIDEBAR_WIDTH
+    for y in range(height):
+        _tui_addstr(stdscr, y, 0, " " * sw)
+
+    lines = [
+        (f"{' STATS':^{sw-1}}", curses.A_BOLD),
+        ("", 0),
+        (f" Total:   {total}", 0),
+        (f" Done:    {done_count}", 0),
+        (f" Pending: {pending_count}", 0),
+        (f" Overdue: {overdue_count}", 0),
+        ("", 0),
+        (" Priority:", curses.A_DIM),
+        (f"  High:   {high}", 0),
+        (f"  Medium: {medium}", 0),
+        (f"  Low:    {low}", 0),
+        ("", 0),
+        (" Mode:", curses.A_DIM),
+        (f"  Filter: {filter_by}", 0),
+        (f"  Sort:   {sort_by}", 0),
+    ]
+    if search_query:
+        lines.append((f"  Search: {search_query[:15]}", 0))
+
+    for y, (text, attr) in enumerate(lines):
+        if y >= height:
+            break
+        _tui_addstr(stdscr, y, 1, text[:sw-2], attr)
+
+    for y in range(height):
+        _tui_addstr(stdscr, y, sw, "\u2502", curses.A_DIM)
+
+
+def _tui_render(stdscr, todo_list, display_list, selected_index, scroll_offset=0, message="",
+                filter_by="all", sort_by="id", search_query=""):
     stdscr.clear()
     height, width = stdscr.getmaxyx()
+
+    _tui_render_sidebar(stdscr, todo_list, filter_by, sort_by, search_query, height)
+    x_offset = _SIDEBAR_WIDTH + 2
 
     title = "TODO LIST"
     mode_str = ""
@@ -70,21 +118,21 @@ def _tui_render(stdscr, todo_list, selected_index, scroll_offset=0, message="",
     if sort_by != "id":
         mode_str += f" [sort: {sort_by}]"
     help_line = "j/k arrows move | space toggle | x remove | a add | e edit | / search | h help | q quit"
-    header = f"{len(todo_list)} item{'s' if len(todo_list) != 1 else ''}{mode_str}"
+    header = f"{len(display_list)} item{'s' if len(display_list) != 1 else ''}{mode_str}"
 
-    _tui_addstr(stdscr, 0, 0, title, curses.A_BOLD)
-    _tui_addstr(stdscr, 0, max(0, width - len(header) - 1), header, curses.A_DIM)
-    _tui_addstr(stdscr, 1, 0, help_line, curses.A_DIM)
-    _tui_addstr(stdscr, 2, 0, message or "Select a task to manage it.", curses.A_BOLD if message else curses.A_DIM)
+    _tui_addstr(stdscr, 0, x_offset, title, curses.A_BOLD)
+    _tui_addstr(stdscr, 0, max(x_offset, width - len(header) - 1), header, curses.A_DIM)
+    _tui_addstr(stdscr, 1, x_offset, help_line, curses.A_DIM)
+    _tui_addstr(stdscr, 2, x_offset, message or "Select a task to manage it.", curses.A_BOLD if message else curses.A_DIM)
 
-    if not todo_list:
-        _tui_addstr(stdscr, 4, 0, "No items yet. Press a to add one from the TUI.", curses.A_DIM)
+    if not display_list:
+        _tui_addstr(stdscr, 4, x_offset, "No items yet. Press a to add one from the TUI.", curses.A_DIM)
         stdscr.refresh()
         return
 
     visible_rows = max(0, height - 6)
-    end_index = min(scroll_offset + visible_rows, len(todo_list))
-    display_items = todo_list[scroll_offset:end_index]
+    end_index = min(scroll_offset + visible_rows, len(display_list))
+    display_items = display_list[scroll_offset:end_index]
 
     for row, item in enumerate(display_items):
         actual_row = 4 + row
@@ -110,17 +158,17 @@ def _tui_render(stdscr, todo_list, selected_index, scroll_offset=0, message="",
         else:
             attr = color_attr if color_attr else None
 
-        _tui_addstr(stdscr, actual_row, 0, line, attr)
+        _tui_addstr(stdscr, actual_row, x_offset, line, attr)
 
-    done_count = sum(1 for item in todo_list if item["done"])
-    total = len(todo_list)
+    done_count = sum(1 for item in display_list if item["done"])
+    total = len(display_list)
     pct = int(done_count / total * 100) if total else 0
     progress = f"Progress: {done_count}/{total} done ({pct}%)"
 
     if scroll_offset > 0:
-        _tui_addstr(stdscr, height - 2, 0, "↑ scroll up", curses.A_DIM)
+        _tui_addstr(stdscr, height - 2, x_offset, "\u2191 scroll up", curses.A_DIM)
 
-    _tui_addstr(stdscr, height - 1, 0, progress, curses.A_DIM)
+    _tui_addstr(stdscr, height - 1, x_offset, progress, curses.A_DIM)
 
     stdscr.refresh()
 
@@ -310,8 +358,8 @@ def _tui_main(stdscr, todo_list):
         if selected_index >= scroll_offset + visible_rows:
             scroll_offset = selected_index - visible_rows + 1
 
-        _tui_render(stdscr, display_list, selected_index, scroll_offset=scroll_offset,
-                    message=message, filter_by=filter_by, sort_by=sort_by)
+        _tui_render(stdscr, todo_list, display_list, selected_index, scroll_offset=scroll_offset,
+                    message=message, filter_by=filter_by, sort_by=sort_by, search_query=search_query)
         message = ""
         key = stdscr.getch()
 
