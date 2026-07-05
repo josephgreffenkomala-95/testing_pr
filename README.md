@@ -19,22 +19,22 @@ list_items(todos)
 ### CLI
 
 ```
-python3 todo.py add "Buy groceries" -p high -d 2025-12-31
-python3 todo.py list --no-color
-python3 todo.py ls -f pending -s priority
-python3 todo.py done 0
-python3 todo.py undone 0
-python3 todo.py edit 0 "Updated task"
-python3 todo.py remove 1
-python3 todo.py search groceries
-python3 todo.py stats
-python3 todo.py clear-done
+python3 -m todo add "Buy groceries" -p high -d 2025-12-31
+python3 -m todo list --no-color
+python3 -m todo ls -f pending -s priority
+python3 -m todo done 0
+python3 -m todo undone 0
+python3 -m todo edit 0 "Updated task"
+python3 -m todo remove 1
+python3 -m todo search groceries
+python3 -m todo stats
+python3 -m todo clear-done
 ```
 
 ### Interactive TUI
 
 ```
-python3 todo.py tui
+python3 -m todo tui
 ```
 
 Opens a full-screen curses-based interactive terminal UI.
