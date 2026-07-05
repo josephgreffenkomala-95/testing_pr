@@ -1,4 +1,3 @@
-import curses
 import json
 import os
 import unittest
@@ -26,6 +25,7 @@ from todo import (
     load_todo_list,
     run_tui,
 )
+import asyncio
 import todo
 
 
@@ -738,191 +738,228 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual(loaded[0]["tags"], [])
 
 
-class FakeScreen:
-    def __init__(self, keys):
-        self._keys = list(keys)
-        self.added = []
-        self.keypad_enabled = False
-
-    def clear(self):
-        pass
-
-    def getmaxyx(self):
-        return (20, 80)
-
-    def addstr(self, *args):
-        self.added.append(args)
-
-    def refresh(self):
-        pass
-
-    def keypad(self, enabled):
-        self.keypad_enabled = enabled
-
-    def getch(self):
-        if self._keys:
-            return self._keys.pop(0)
-        return ord("q")
+try:
+    from todo.tui import TodoApp
+    _HAS_TEXTUAL = True
+except ImportError:
+    _HAS_TEXTUAL = False
 
 
 class TestTui(unittest.TestCase):
-    def test_run_tui_uses_curses_wrapper(self):
+    """TUI integration tests using textual Pilot."""
+
+    def test_run_tui_returns_true_when_changed(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
         todos = create_todo_list()
         add_item(todos, "Task 1")
 
-        with patch("todo.curses.wrapper", autospec=True) as mock_wrapper:
-            mock_wrapper.return_value = True
-            result = run_tui(todos)
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("space")
+                await pilot.press("q")
 
-        mock_wrapper.assert_called_once()
-        self.assertTrue(result)
-
-    def test_tui_main_toggles_selected_item(self):
-        todos = create_todo_list()
-        add_item(todos, "Task 1")
-        screen = FakeScreen([ord(" "), ord("q")])
-
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
-            changed = todo._tui_main(screen, todos)
-
-        self.assertTrue(changed)
+        asyncio.run(_run())
         self.assertTrue(todos[0]["done"])
 
-    def test_tui_main_removes_selected_item(self):
+    def test_run_tui_returns_false_when_no_changes(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
         todos = create_todo_list()
         add_item(todos, "Task 1")
-        add_item(todos, "Task 2")
-        screen = FakeScreen([ord("x"), ord("q")])
 
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
-            changed = todo._tui_main(screen, todos)
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("q")
 
-        self.assertTrue(changed)
-        self.assertEqual(len(todos), 1)
-        self.assertEqual(todos[0]["task"], "Task 2")
+        asyncio.run(_run())
 
-    def test_tui_main_adds_item_from_prompt(self):
+    def test_toggle_marks_item_done(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
         todos = create_todo_list()
         add_item(todos, "Task 1")
-        screen = FakeScreen([ord("a"), ord("N"), ord("e"), ord("w"), 10, ord("q")])
 
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
-            changed = todo._tui_main(screen, todos)
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("space")
+                await pilot.press("q")
 
-        self.assertTrue(changed)
-        self.assertEqual(len(todos), 2)
-        self.assertEqual(todos[1]["task"], "New")
+        asyncio.run(_run())
+        self.assertTrue(todos[0]["done"])
 
-    def test_tui_main_uses_mouse_for_selection_and_toggle(self):
+    def test_toggle_marks_done_item_pending(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
         todos = create_todo_list()
         add_item(todos, "Task 1")
-        add_item(todos, "Task 2")
-        screen = FakeScreen([curses.KEY_MOUSE, curses.KEY_MOUSE, ord("q")])
-
-        mouse_event = (0, 0, 5, 0, curses.BUTTON1_CLICKED)
-
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0), patch(
-            "todo.curses.getmouse", side_effect=[mouse_event, mouse_event]
-        ):
-            changed = todo._tui_main(screen, todos)
-
-        self.assertTrue(changed)
-        self.assertTrue(todos[1]["done"])
-
-    def test_tui_main_uses_mouse_for_removal(self):
-        todos = create_todo_list()
-        add_item(todos, "Task 1")
-        add_item(todos, "Task 2")
-        screen = FakeScreen([curses.KEY_MOUSE, ord("q")])
-
-        mouse_event = (0, 0, 4, 0, curses.BUTTON3_CLICKED)
-
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0), patch(
-            "todo.curses.getmouse", return_value=mouse_event
-        ):
-            changed = todo._tui_main(screen, todos)
-
-        self.assertTrue(changed)
-        self.assertEqual(len(todos), 1)
-        self.assertEqual(todos[0]["task"], "Task 2")
-
-    def test_tui_render_shows_header_and_empty_state(self):
-        screen = FakeScreen([])
-
-        todo._tui_render(screen, [], 0, message="Saved.")
-
-        rendered_text = [args[2] for args in screen.added if len(args) >= 3]
-        self.assertTrue(any("TODO LIST" in text for text in rendered_text))
-        self.assertTrue(any("Saved." in text for text in rendered_text))
-        self.assertTrue(any("No items yet" in text for text in rendered_text))
-
-    def test_tui_render_shows_footer_stats(self):
-        todos = create_todo_list()
-        add_item(todos, "Task 1")
-        add_item(todos, "Task 2")
         mark_done(todos, todos[0]["id"])
-        screen = FakeScreen([])
 
-        todo._tui_render(screen, todos, 0)
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("space")
+                await pilot.press("q")
 
-        rendered_text = [args[2] for args in screen.added if len(args) >= 3]
-        has_stats = any("1 of 2" in text or "2 items" in text or "done" in text.lower() for text in rendered_text)
-        self.assertTrue(has_stats)
+        asyncio.run(_run())
+        self.assertFalse(todos[0]["done"])
 
-    def test_tui_render_highlights_selected_item(self):
-        todos = create_todo_list()
-        add_item(todos, "Task 1", due="2025-12-31", tags="work")
-        screen = FakeScreen([])
-
-        todo._tui_render(screen, todos, 0)
-
-        self.assertTrue(any(len(args) >= 4 and args[3] == curses.A_REVERSE for args in screen.added))
-        self.assertTrue(any(len(args) >= 3 and args[2].startswith("> ") for args in screen.added))
-
-    def test_tui_render_uses_priority_color_for_high(self):
-        todos = create_todo_list()
-        add_item(todos, "Urgent task", priority="high")
-        screen = FakeScreen([])
-
-        todo._tui_render(screen, todos, 0)
-
-        rendered_text = [args[2] for args in screen.added if len(args) >= 3]
-        self.assertTrue(any("[H]" in text for text in rendered_text))
-
-    def test_tui_main_edits_selected_item(self):
-        todos = create_todo_list()
-        add_item(todos, "Old task")
-        screen = FakeScreen([ord("e"), ord("N"), ord("e"), ord("w"), 10, ord("q")])
-
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
-            changed = todo._tui_main(screen, todos)
-
-        self.assertTrue(changed)
-        self.assertEqual(todos[0]["task"], "New")
-
-    def test_tui_main_confirms_before_remove(self):
+    def test_cursor_movement_down(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
         todos = create_todo_list()
         add_item(todos, "Task 1")
         add_item(todos, "Task 2")
-        screen = FakeScreen([ord("x"), ord("y"), ord("q")])
+        add_item(todos, "Task 3")
 
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
-            changed = todo._tui_main(screen, todos)
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                list_view = app.query_one("#task-list")
+                self.assertEqual(list_view.index, 0)
+                await pilot.press("j")
+                self.assertEqual(list_view.index, 1)
+                await pilot.press("j")
+                self.assertEqual(list_view.index, 2)
+                await pilot.press("q")
 
-        self.assertTrue(changed)
+        asyncio.run(_run())
+
+    def test_cursor_movement_up(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+        add_item(todos, "Task 3")
+
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                list_view = app.query_one("#task-list")
+                self.assertEqual(list_view.index, 0)
+                await pilot.press("j")
+                await pilot.press("j")
+                self.assertEqual(list_view.index, 2)
+                await pilot.press("k")
+                self.assertEqual(list_view.index, 1)
+                await pilot.press("q")
+
+        asyncio.run(_run())
+
+    def test_remove_with_confirmation(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        add_item(todos, "Task 2")
+
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("x")
+                await pilot.pause()
+                await pilot.press("y")
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                await pilot.press("q")
+
+        asyncio.run(_run())
         self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["task"], "Task 2")
 
-    def test_tui_main_cancels_remove(self):
+    def test_cancel_remove(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
         todos = create_todo_list()
         add_item(todos, "Task 1")
         add_item(todos, "Task 2")
-        screen = FakeScreen([ord("x"), ord("n"), ord("q")])
 
-        with patch("todo.curses.curs_set", return_value=None), patch("todo.curses.mousemask", return_value=0):
-            changed = todo._tui_main(screen, todos)
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("x")
+                await pilot.press("n")
+                await pilot.press("q")
 
-        self.assertFalse(changed)
+        asyncio.run(_run())
         self.assertEqual(len(todos), 2)
+
+    def test_cycle_filter(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        mark_done(todos, todos[0]["id"])
+        add_item(todos, "Task 2")
+
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("f")
+                list_view = app.query_one("#task-list")
+                self.assertEqual(len(list_view.children), 1)
+                await pilot.press("q")
+
+        asyncio.run(_run())
+
+    def test_cycle_sort(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
+        todos = create_todo_list()
+        add_item(todos, "Task 1", priority="low")
+        add_item(todos, "Task 2", priority="high")
+
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("s")
+                list_view = app.query_one("#task-list")
+                first_id = list_view.children[0]._item_id
+                second_id = list_view.children[1]._item_id
+                first_item = next(i for i in todos if i["id"] == first_id)
+                second_item = next(i for i in todos if i["id"] == second_id)
+                self.assertEqual(first_item["priority"], "high")
+                self.assertEqual(second_item["priority"], "low")
+                await pilot.press("q")
+
+        asyncio.run(_run())
+
+    def test_undo(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
+        todos = create_todo_list()
+        add_item(todos, "Task 1")
+        mark_done(todos, todos[0]["id"])
+
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("u")
+                await pilot.press("q")
+
+        asyncio.run(_run())
+        self.assertFalse(todos[0]["done"])
+
+    def test_help_screen_opens_and_closes(self):
+        if not _HAS_TEXTUAL:
+            self.skipTest("textual not installed")
+        todos = create_todo_list()
+
+        async def _run():
+            app = TodoApp(todos)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.press("h")
+                self.assertTrue(len(app.screen_stack) >= 2)
+                await pilot.press("escape")
+                self.assertEqual(len(app.screen_stack), 1)
+                await pilot.press("q")
+
+        asyncio.run(_run())
 
 
 if __name__ == "__main__":

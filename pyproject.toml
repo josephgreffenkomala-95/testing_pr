@@ -1,0 +1,13 @@
+[project]
+name = "todo"
+version = "0.1.0"
+description = "A feature-rich to-do list CLI with a beautiful TUI"
+requires-python = ">=3.9"
+dependencies = [
+    "textual>=2.0.0",
+    "rich>=13.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"

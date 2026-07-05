@@ -1,4 +1,3 @@
-import curses
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -11,8 +10,6 @@ from todo import (
     _tui_build_display,
     _tui_is_overdue,
     _tui_item_line,
-    _tui_item_detail,
-    _tui_help,
     _UNDO_STACKS,
     _PRIORITY_ORDER,
 )
@@ -171,43 +168,6 @@ class TestTuiItemLine(unittest.TestCase):
         add_item(todos, "Task", tags="work,urgent")
         line, _ = _tui_item_line(todos[0])
         self.assertIn("{work,urgent}", line)
-
-
-class TestTuiItemDetail(unittest.TestCase):
-    def test_detail_shows_all_fields(self):
-        mock_stdscr = MagicMock()
-        mock_stdscr.getmaxyx.return_value = (40, 80)
-        todos = create_todo_list()
-        add_item(todos, "Test task", priority="high", due="2025-12-31", tags="work")
-        _tui_item_detail(mock_stdscr, todos[0])
-        calls = [c[0] for c in mock_stdscr.addstr.call_args_list]
-        all_text = " ".join(str(c) for c in calls)
-        self.assertIn("Test task", all_text)
-        self.assertIn("high", all_text)
-        self.assertIn("2025-12-31", all_text)
-        self.assertIn("work", all_text)
-
-    def test_detail_shows_no_due_none_tags(self):
-        mock_stdscr = MagicMock()
-        mock_stdscr.getmaxyx.return_value = (40, 80)
-        todos = create_todo_list()
-        add_item(todos, "Simple task")
-        _tui_item_detail(mock_stdscr, todos[0])
-        calls = [c[0] for c in mock_stdscr.addstr.call_args_list]
-        all_text = " ".join(str(c) for c in calls)
-        self.assertIn("None", all_text)
-
-
-class TestTuiHelp(unittest.TestCase):
-    def test_help_shows_all_sections(self):
-        mock_stdscr = MagicMock()
-        mock_stdscr.getmaxyx.return_value = (40, 80)
-        mock_stdscr.getch.return_value = ord("q")
-        _tui_help(mock_stdscr)
-        calls = [c[0] for c in mock_stdscr.addstr.call_args_list]
-        all_text = " ".join(str(c) for c in calls)
-        for keyword in ["Navigation", "Actions", "Display", "Mouse", "Space", "/", "u", "f", "s", "i", "h"]:
-            self.assertIn(keyword, all_text)
 
 
 class TestTuiUndo(unittest.TestCase):
