@@ -111,18 +111,24 @@ def _tui_render(stdscr, todo_list, display_list, selected_index, scroll_offset=0
     _tui_render_sidebar(stdscr, todo_list, filter_by, sort_by, search_query, height)
     x_offset = _SIDEBAR_WIDTH + 2
 
+    border_attr = curses.A_DIM
+    for cx in range(x_offset, width - 1):
+        _tui_addstr(stdscr, 3, cx, "\u2500", border_attr)
+    _tui_addstr(stdscr, 3, x_offset - 1, "\u250c", border_attr)
+    _tui_addstr(stdscr, 3, width - 1, "\u2510", border_attr)
+
     title = "TODO LIST"
     mode_str = ""
     if filter_by != "all":
         mode_str += f" [filter: {filter_by}]"
     if sort_by != "id":
         mode_str += f" [sort: {sort_by}]"
-    help_line = "j/k arrows move | space toggle | x remove | a add | e edit | / search | h help | q quit"
+    hint_line = "h help | q quit"
     header = f"{len(display_list)} item{'s' if len(display_list) != 1 else ''}{mode_str}"
 
     _tui_addstr(stdscr, 0, x_offset, title, curses.A_BOLD)
     _tui_addstr(stdscr, 0, max(x_offset, width - len(header) - 1), header, curses.A_DIM)
-    _tui_addstr(stdscr, 1, x_offset, help_line, curses.A_DIM)
+    _tui_addstr(stdscr, 1, x_offset, hint_line, curses.A_DIM)
     _tui_addstr(stdscr, 2, x_offset, message or "Select a task to manage it.", curses.A_BOLD if message else curses.A_DIM)
 
     if not display_list:
@@ -201,6 +207,9 @@ def _tui_handle_mouse(display_list, todo_list, selected_index):
     try:
         _, _, y, _, bstate = curses.getmouse()
     except curses.error:
+        return selected_index, False, ""
+
+    if not (bstate & (curses.BUTTON1_CLICKED | curses.BUTTON3_CLICKED)):
         return selected_index, False, ""
 
     row = y - 4
@@ -338,7 +347,7 @@ def _tui_main(stdscr, todo_list):
     curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
 
     try:
-        mouse_events = getattr(curses, "ALL_MOUSE_EVENTS", 0) | getattr(curses, "REPORT_MOUSE_POSITION", 0)
+        mouse_events = getattr(curses, "ALL_MOUSE_EVENTS", 0)
         curses.mousemask(mouse_events)
     except (AttributeError, curses.error):
         pass
