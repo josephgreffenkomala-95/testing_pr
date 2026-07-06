@@ -24,6 +24,9 @@ def _default_config_dir() -> Path:
     override = os.environ.get("FINANCE_MANAGER_CONFIG_DIR")
     if override:
         return Path(override).expanduser()
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / "finance-manager"
     return Path.home() / ".config" / "finance-manager"
 
 

@@ -209,10 +209,13 @@ class SheetSelectScreen(ModalScreen[SheetRef | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="sheet-panel"):
             yield Label("Select a spreadsheet", id="sheet-title")
-            list_view = ListView(id="sheet-list")
-            yield list_view
+            yield ListView(id="sheet-list")
             with Vertical(id="sheet-actions"):
                 yield Button("Cancel", id="sheet-cancel")
+
+    def on_mount(self) -> None:
+        # Populate the ListView after mount rather than during compose, per
+        # Textual conventions that avoid widget mutation inside compose().
         list_view = self.query_one("#sheet-list", ListView)
         for sheet in self.sheets:
             list_view.append(ListItem(Label(f"{sheet.title}\n{sheet.spreadsheet_id}")))

@@ -15,6 +15,7 @@ from finance_manager.logic.calculations import current_month, month_budget_repor
 from finance_manager.models.entities import Budget, PlannedTransaction, Snapshot, Transaction
 from finance_manager.services.sheets import (
     ExternalServiceError,
+    FinanceManagerError,
     GoogleSheetsRepository,
     InvalidSheetStructureError,
     MissingCredentialsError,
@@ -209,7 +210,7 @@ class FinanceManagerApp(App[None]):
             return
         try:
             run_oauth_flow(self.repository.config)
-        except Exception as exc:
+        except FinanceManagerError as exc:
             self.error_message = f"OAuth failed: {exc}"
             self._refresh_ui(self.error_message)
             return
@@ -224,14 +225,14 @@ class FinanceManagerApp(App[None]):
         """
         try:
             sheets = self.repository.list_spreadsheets()
-        except Exception as exc:
+        except FinanceManagerError as exc:
             self.error_message = f"Could not list spreadsheets: {exc}"
             self._refresh_ui(self.error_message)
             return
         if not sheets:
             try:
                 self.repository.bootstrap()
-            except Exception as exc:
+            except FinanceManagerError as exc:
                 self.error_message = f"Could not create spreadsheet: {exc}"
                 self._refresh_ui(self.error_message)
                 return
@@ -246,7 +247,7 @@ class FinanceManagerApp(App[None]):
             return
         try:
             self.repository.use_spreadsheet(sheet.spreadsheet_id, sheet.title)
-        except Exception as exc:
+        except FinanceManagerError as exc:
             self.error_message = f"Could not open spreadsheet: {exc}"
             self._refresh_ui(self.error_message)
             return
@@ -465,7 +466,7 @@ class FinanceManagerApp(App[None]):
                 return
             self.snapshot = self.repository.load_snapshot()
             self._refresh_ui("Deleted record.")
-        except Exception as exc:
+        except (FinanceManagerError, KeyError) as exc:
             self.query_one("#status", Static).update(str(exc))
 
     def _open_transaction_form(self, record: Transaction | None = None) -> None:
@@ -528,7 +529,7 @@ class FinanceManagerApp(App[None]):
                 self.repository.add_transaction(data)
             self.snapshot = self.repository.load_snapshot()
             self._refresh_ui("Saved transaction.")
-        except Exception as exc:
+        except (FinanceManagerError, ValueError, KeyError) as exc:
             self.query_one("#status", Static).update(str(exc))
 
     def _save_planned_form(self, data: dict[str, str] | None, record_id: str | None) -> None:
@@ -542,7 +543,7 @@ class FinanceManagerApp(App[None]):
                 self.repository.add_planned_transaction(data)
             self.snapshot = self.repository.load_snapshot()
             self._refresh_ui("Saved planned transaction.")
-        except Exception as exc:
+        except (FinanceManagerError, ValueError, KeyError) as exc:
             self.query_one("#status", Static).update(str(exc))
 
     def _save_budget_form(self, data: dict[str, str] | None, record_id: str | None) -> None:
@@ -556,7 +557,7 @@ class FinanceManagerApp(App[None]):
                 self.repository.add_budget(data)
             self.snapshot = self.repository.load_snapshot()
             self._refresh_ui("Saved budget.")
-        except Exception as exc:
+        except (FinanceManagerError, ValueError, KeyError) as exc:
             self.query_one("#status", Static).update(str(exc))
 
     def _category_name(self, category_id: str) -> str:
