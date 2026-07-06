@@ -13,7 +13,7 @@ from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from finance_manager.config.auth import run_oauth_flow
 from finance_manager.config.settings import persist_app_state
-from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
+from finance_manager.logic.calculations import BudgetUsage, ProjectionPoint, current_month, month_budget_report, projection, total_balance
 from finance_manager.models.entities import Account, Budget, PlannedTransaction, Snapshot, Transaction
 from finance_manager.services.sheets import (
     ExternalServiceError,
@@ -60,7 +60,7 @@ Footer {
     width: 30;
     padding: 1 2;
     background: #24283b;
-    color: #9aa5ce;
+    color: #a9b1d6;
     border-right: solid #414868;
 }
 #main {
@@ -114,6 +114,12 @@ DataTable {
     & > .datatable--hover {
         background: #414868;
     }
+    & > .datatable--even {
+        background: #24283b;
+    }
+    & > .datatable--odd {
+        background: #1e2030;
+    }
 }
 #detail {
     width: 40;
@@ -125,7 +131,7 @@ DataTable {
 #status {
     height: 3;
     padding: 0 1;
-    color: #9aa5ce;
+    color: #a9b1d6;
 }
 #form-modal {
     width: 72;
@@ -171,13 +177,13 @@ Header {
 }
 Footer {
     background: #f0f0f0;
-    color: #666666;
+    color: #333333;
 }
 #sidebar {
     width: 30;
     padding: 1 2;
     background: #f0f0f0;
-    color: #666666;
+    color: #333333;
     border-right: solid #cccccc;
 }
 #main {
@@ -231,6 +237,12 @@ DataTable {
     & > .datatable--hover {
         background: #e8f0fe;
     }
+    & > .datatable--even {
+        background: #ffffff;
+    }
+    & > .datatable--odd {
+        background: #f5f5f5;
+    }
 }
 #detail {
     width: 40;
@@ -242,7 +254,7 @@ DataTable {
 #status {
     height: 3;
     padding: 0 1;
-    color: #666666;
+    color: #333333;
 }
 #form-modal {
     width: 72;
@@ -560,16 +572,60 @@ class FinanceManagerApp(App[None]):
             lines.extend(["", "Status", self.error_message[:120]])
         return "\n".join(lines)
 
+    def _fmt_amount_colored(self, amount: Decimal | float, currency: str = "IDR") -> str:
+        formatted = _format_amount(amount, currency)
+        if amount > 0:
+            return f"[green]{formatted}[/]"
+        if amount < 0:
+            return f"[red]{formatted}[/]"
+        return formatted
+
+    def _fmt_type_colored(self, entry_type: str) -> str:
+        color = "green" if entry_type == "income" else "red"
+        return f"[{color}]{entry_type.upper()}[/]"
+
+    def _fmt_transaction(self, item: Transaction, categories: dict[str, str], accounts: dict[str, str]) -> str:
+        amount = _format_amount(item.amount)
+        colored_amount = f"[green]{amount}[/]" if item.entry_type == "income" else f"[red]{amount}[/]"
+        return f"{item.date} | {self._fmt_type_colored(item.entry_type)} | {colored_amount} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}"
+
+    def _fmt_planned(self, item: PlannedTransaction, categories: dict[str, str], accounts: dict[str, str], status_colors: dict[str, str]) -> str:
+        amount = _format_amount(item.amount)
+        colored_amount = f"[green]{amount}[/]" if item.entry_type == "income" else f"[red]{amount}[/]"
+        sc = status_colors.get(item.status)
+        colored_status = f"[{sc}]{item.status.upper()}[/]" if sc else item.status.upper()
+        return f"{item.expected_date or 'No date'} | {colored_status} | {self._fmt_type_colored(item.entry_type)} | {colored_amount} | {categories.get(item.category_id, item.category_id)} | {item.description}"
+
+    def _fmt_budget_row(self, row: BudgetUsage) -> str:
+        budgeted = self._fmt_amount_colored(row.budgeted)
+        actual = self._fmt_amount_colored(row.actual)
+        planned = self._fmt_amount_colored(row.planned)
+        remaining = self._fmt_amount_colored(row.projected_remaining)
+        return f"{row.category_name} | {row.entry_type} | {budgeted} | {actual} | {planned} | {remaining}"
+
+    def _fmt_projection(self, point: ProjectionPoint) -> str:
+        balance = self._fmt_amount_colored(point.balance)
+        if point.change >= 0:
+            change = f"[green]{_format_amount(point.change)}[/]"
+        else:
+            change = f"[red]{_format_amount(point.change)}[/]"
+        return f"{point.label} | {balance} | {change}"
+
+    def _fmt_account(self, account: Account) -> str:
+        balance = self._fmt_amount_colored(account.current_balance, account.currency)
+        return f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {balance} | {'yes' if account.is_active else 'no'}"
+
     def _rows_for_current_view(self) -> list[RowRef]:
         categories = {category.id: category.name for category in self.snapshot.categories}
         accounts = {account.id: account.name for account in self.snapshot.accounts}
+        status_colors = {"planned": "yellow", "confirmed": "blue", "completed": "green", "cancelled": "red"}
         if self.current_view == "transactions":
             items = sorted(self.snapshot.transactions, key=lambda item: item.date, reverse=True)
             return [
                 RowRef(
                     record_id=item.id,
                     title=f"{item.date} {item.entry_type.upper()} {_format_amount(item.amount)}",
-                    subtitle=f"{item.date} | {item.entry_type.upper()} | {_format_amount(item.amount)} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}",
+                    subtitle=self._fmt_transaction(item, categories, accounts),
                 )
                 for item in items
             ]
@@ -579,7 +635,7 @@ class FinanceManagerApp(App[None]):
                 RowRef(
                     record_id=item.id,
                     title=f"{item.expected_date or 'No date'} {item.status.upper()} {_format_amount(item.amount)}",
-                    subtitle=f"{item.expected_date or 'No date'} | {item.status.upper()} | {item.entry_type} | {_format_amount(item.amount)} | {categories.get(item.category_id, item.category_id)} | {item.description}",
+                    subtitle=self._fmt_planned(item, categories, accounts, status_colors),
                 )
                 for item in planned_items
             ]
@@ -589,7 +645,7 @@ class FinanceManagerApp(App[None]):
                 RowRef(
                     record_id=self._budget_id_for(row.category_name, row.entry_type) or row.category_name,
                     title=f"{row.category_name} budget {_format_amount(row.budgeted)}",
-                    subtitle=f"{row.category_name} | {row.entry_type} | {_format_amount(row.budgeted)} | {_format_amount(row.actual)} | {_format_amount(row.planned)} | {_format_amount(row.projected_remaining)}",
+                    subtitle=self._fmt_budget_row(row),
                 )
                 for row in report
             ]
@@ -599,7 +655,7 @@ class FinanceManagerApp(App[None]):
                 RowRef(
                     record_id=str(index),
                     title=f"{point.label} balance {_format_amount(point.balance)}",
-                    subtitle=f"{point.label} | {_format_amount(point.balance)} | {_format_amount(point.change)}",
+                    subtitle=self._fmt_projection(point),
                 )
                 for index, point in enumerate(daily)
             ]
@@ -608,7 +664,7 @@ class FinanceManagerApp(App[None]):
                 RowRef(
                     record_id=account.id,
                     title=f"{account.name} {_format_amount(account.current_balance, account.currency)}",
-                    subtitle=f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {_format_amount(account.current_balance, account.currency)} | {'yes' if account.is_active else 'no'}",
+                    subtitle=self._fmt_account(account),
                 )
                 for account in self.snapshot.accounts
             ]
@@ -645,15 +701,30 @@ class FinanceManagerApp(App[None]):
             return self.current_rows[0] if self.current_rows else None
         return self.current_rows[table.cursor_row]
 
+    def _detail_labels(self) -> list[str]:
+        if self.current_view == "transactions":
+            return ["Date", "Type", "Amount", "Category", "Account", "Description"]
+        if self.current_view == "planned":
+            return ["Expected date", "Status", "Type", "Amount", "Category", "Description"]
+        if self.current_view == "budgets":
+            return ["Category", "Type", "Budgeted", "Actual", "Planned", "Remaining"]
+        if self.current_view == "projection":
+            return ["Label", "Balance", "Change"]
+        if self.current_view == "accounts":
+            return ["ID", "Name", "Type", "Currency", "Balance", "Active"]
+        return ["Title", "Subtitle"]
+
     def _update_detail(self) -> None:
         row = self._selected_row()
         detail = self.query_one("#detail", Static)
         if row is None:
             detail.update(Panel("No records yet.\nPress `a` to add one.", title="Details"))
             return
+        labels = self._detail_labels()
+        parts = row.subtitle.split(" | ")
         lines = [f"[bold]{row.title}[/bold]", ""]
-        for part in row.subtitle.split(" | "):
-            lines.append(f"  {part}")
+        for label, part in zip(labels, parts):
+            lines.append(f"  [bold]{label}:[/] {part}")
         detail.update(Panel("\n".join(lines), title="Details", border_style="blue"))
 
     def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
