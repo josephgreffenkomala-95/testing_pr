@@ -82,15 +82,25 @@ class GoogleSheetsRepository:
         self._client_factory = client_factory
         self._client = None
         self._spreadsheet = None
+        self._cache: Snapshot | None = None
+        self._id_counters: dict[str, int] = {}
 
     def bootstrap(self) -> str:
+        if self._spreadsheet is not None:
+            return getattr(self._spreadsheet, "id", "") or ""
         self._spreadsheet = self._open_or_create_spreadsheet()
         self._ensure_schema()
         self._seed_defaults()
+        self._cache = None
         spreadsheet_id = getattr(self._spreadsheet, "id", None)
         if spreadsheet_id:
             persist_app_state(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=self.config.spreadsheet_title)
         return spreadsheet_id or ""
+
+    def spreadsheet_url(self) -> str:
+        if self._spreadsheet is None:
+            return ""
+        return getattr(self._spreadsheet, "url", "") or ""
 
     def list_spreadsheets(self) -> list[tuple[str, str]]:
         client = self._get_client()
@@ -102,11 +112,18 @@ class GoogleSheetsRepository:
 
     def use_spreadsheet(self, spreadsheet_id: str, title: str = "") -> str:
         self.config = replace(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=title or spreadsheet_id)
+        self._spreadsheet = None
+        self._cache = None
         return self.bootstrap()
+
+    def clear_cache(self) -> None:
+        self._cache = None
 
     def load_snapshot(self) -> Snapshot:
         self._require_ready()
-        return Snapshot(
+        if self._cache is not None:
+            return self._cache
+        snapshot = Snapshot(
             transactions=self._read_entities("Transactions"),
             planned_transactions=self._read_entities("Planned Transactions"),
             budgets=self._read_entities("Budgets"),
@@ -114,6 +131,9 @@ class GoogleSheetsRepository:
             accounts=self._read_entities("Accounts"),
             settings=self._read_settings(),
         )
+        self._cache = snapshot
+        self._init_id_counters(snapshot)
+        return snapshot
 
     def add_transaction(self, data: dict[str, str]) -> Transaction:
         snapshot = self.load_snapshot()
@@ -379,6 +399,7 @@ class GoogleSheetsRepository:
     def _append_entity(self, title: str, entity: object) -> None:
         worksheet = self._worksheet(title)
         worksheet.append_row(entity_to_row(entity, SHEET_HEADERS[title]))
+        self._cache = None
 
     def _replace_entity(self, title: str, entity: object) -> None:
         worksheet = self._worksheet(title)
@@ -388,6 +409,7 @@ class GoogleSheetsRepository:
         for index, row in enumerate(records, start=2):
             if str(row.get("id")) == entity_id:
                 worksheet.update(f"A{index}:{self._col_name(len(headers))}{index}", [entity_to_row(entity, headers)])
+                self._cache = None
                 return
         raise KeyError(entity_id)
 
@@ -397,8 +419,33 @@ class GoogleSheetsRepository:
         for index, row in enumerate(records, start=2):
             if str(row.get("id")) == record_id:
                 worksheet.delete_rows(index)
+                self._cache = None
                 return
         raise KeyError(record_id)
+
+    def _init_id_counters(self, snapshot: Snapshot) -> None:
+        counters = self._id_counters
+        for tx in snapshot.transactions:
+            self._bump_counter(counters, tx.id, "TX")
+        for planned in snapshot.planned_transactions:
+            self._bump_counter(counters, planned.id, "PLN")
+        for budget in snapshot.budgets:
+            self._bump_counter(counters, budget.id, "BDG")
+        for category in snapshot.categories:
+            self._bump_counter(counters, category.id, "CAT")
+        for account in snapshot.accounts:
+            self._bump_counter(counters, account.id, "ACC")
+
+    @staticmethod
+    def _bump_counter(counters: dict[str, int], value: str, prefix: str) -> None:
+        if not value.startswith(prefix):
+            return
+        try:
+            current = int(value[len(prefix):])
+        except ValueError:
+            return
+        if current > counters.get(prefix, 0):
+            counters[prefix] = current
 
     def _get_entity(self, title: str, record_id: str):
         for entity in self._read_entities(title):
@@ -407,22 +454,10 @@ class GoogleSheetsRepository:
         raise KeyError(record_id)
 
     def _next_id(self, title: str, prefix: str) -> str:
-        """Generate the next sequential ID for a sheet.
-
-        Note: this re-reads all entities and scans IDs sequentially. It is not
-        thread-safe — concurrent operations in async or threaded contexts
-        could produce duplicate IDs. Callers are responsible for serialising
-        writes when used outside a single-threaded flow.
-        """
-        values = [entity.id for entity in self._read_entities(title)]
-        highest = 0
-        for value in values:
-            if value.startswith(prefix):
-                try:
-                    highest = max(highest, int(value[len(prefix):]))
-                except ValueError:
-                    continue
-        return f"{prefix}{highest + 1:04d}"
+        highest = self._id_counters.get(prefix, 0)
+        next_value = highest + 1
+        self._id_counters[prefix] = next_value
+        return f"{prefix}{next_value:04d}"
 
     @staticmethod
     def _col_name(index: int) -> str:

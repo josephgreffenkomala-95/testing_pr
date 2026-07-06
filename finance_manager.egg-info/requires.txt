@@ -1,0 +1,5 @@
+gspread>=6.1.2
+google-auth>=2.32.0
+google-auth-oauthlib>=1.2.1
+rich>=13.0.0
+textual>=2.0.0

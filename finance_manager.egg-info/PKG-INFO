@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: finance-manager
+Version: 0.1.0
+Summary: A CLI-based personal finance manager with a Textual TUI and Google Sheets backend
+Requires-Python: >=3.9
+Requires-Dist: gspread>=6.1.2
+Requires-Dist: google-auth>=2.32.0
+Requires-Dist: google-auth-oauthlib>=1.2.1
+Requires-Dist: rich>=13.0.0
+Requires-Dist: textual>=2.0.0
