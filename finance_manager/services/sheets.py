@@ -277,6 +277,138 @@ class GoogleSheetsRepository:
         self._append_entity("Accounts", account)
         return account
 
+    def add_account(self, data: dict[str, str]) -> Account:
+        cleaned_name = data["name"].strip()
+        if not cleaned_name:
+            raise ValueError("Account name is required.")
+        account_type = data.get("account_type", "cash").strip().lower() or "cash"
+        currency = data.get("currency", "IDR").strip().upper() or "IDR"
+        balance = _require_amount(data.get("current_balance", "0"))
+        existing = self._read_entities("Accounts")
+        for account in existing:
+            if account.name.lower() == cleaned_name.lower():
+                raise ValueError(f"Account '{cleaned_name}' already exists.")
+        account = Account(
+            id=self._next_id("Accounts", "ACC"),
+            name=cleaned_name,
+            account_type=account_type,
+            currency=currency,
+            current_balance=balance,
+            is_active=True,
+        )
+        self._append_entity("Accounts", account)
+        return account
+
+    def update_account(self, record_id: str, data: dict[str, str]) -> Account:
+        current = next((item for item in self._read_entities("Accounts") if item.id == record_id), None)
+        if current is None:
+            raise KeyError(record_id)
+        new_name = data["name"].strip() or current.name
+        for account in self._read_entities("Accounts"):
+            if account.id != record_id and account.name.lower() == new_name.lower():
+                raise ValueError(f"Account '{new_name}' already exists.")
+        updated = replace(
+            current,
+            name=new_name,
+            account_type=data.get("account_type", current.account_type).strip().lower() or current.account_type,
+            currency=data.get("currency", current.currency).strip().upper() or current.currency,
+            current_balance=_require_amount(data.get("current_balance", f"{current.current_balance:.2f}")),
+        )
+        self._replace_entity("Accounts", updated)
+        return updated
+
+    def delete_account(self, record_id: str) -> None:
+        self._delete_entity("Accounts", record_id)
+
+    def get_account(self, record_id: str) -> Account:
+        for account in self._read_entities("Accounts"):
+            if account.id == record_id:
+                return account
+        raise KeyError(record_id)
+
+    def seed_dummy_data(self) -> int:
+        """Populate the sheet with sample accounts, categories, budgets and
+        transactions when it is empty. Returns the number of rows created.
+        """
+        snapshot = self.load_snapshot()
+        created = 0
+        if not snapshot.accounts:
+            accounts = [
+                Account("ACC0001", "Cash", "cash", "IDR", Decimal("1250000.00"), True),
+                Account("ACC0002", "Bank BCA", "bank", "IDR", Decimal("8750000.00"), True),
+                Account("ACC0003", "Bank Mandiri", "bank", "IDR", Decimal("3200000.00"), True),
+            ]
+            for account in accounts:
+                self._append_entity("Accounts", account)
+                created += 1
+        accounts = self._read_entities("Accounts")
+        needed_categories = ["Salary", "Freelance", "Groceries", "Rent", "Transport", "Dining", "Utilities"]
+        existing_category_names = {category.name.lower() for category in self._read_entities("Categories")}
+        for name in needed_categories:
+            if name.lower() in existing_category_names:
+                continue
+            entry_type = "income" if name in {"Salary", "Freelance"} else "expense"
+            category = Category(self._next_id("Categories", "CAT"), name, entry_type, True)
+            self._append_entity("Categories", category)
+            created += 1
+        categories = self._read_entities("Categories")
+        cat_by_name = {category.name: category for category in categories}
+        accounts_by_name = {account.name: account for account in accounts}
+        month = datetime.now(UTC).strftime("%Y-%m")
+        existing_budgets = self._read_entities("Budgets")
+        if not existing_budgets:
+            budgets = [
+                ("Groceries", "expense", Decimal("1500000.00")),
+                ("Rent", "expense", Decimal("3000000.00")),
+                ("Transport", "expense", Decimal("500000.00")),
+                ("Dining", "expense", Decimal("750000.00")),
+                ("Utilities", "expense", Decimal("600000.00")),
+            ]
+            for index, (name, entry_type, amount) in enumerate(budgets, start=1):
+                category = cat_by_name.get(name)
+                if category is None:
+                    continue
+                budget = Budget(
+                    id=f"BDG{index:04d}",
+                    month=month,
+                    category_id=category.id,
+                    entry_type=entry_type,
+                    amount=amount,
+                )
+                self._append_entity("Budgets", budget)
+                created += 1
+        existing_tx = self._read_entities("Transactions")
+        if not existing_tx:
+            today = datetime.now(UTC)
+            samples = [
+                ("income", (today.replace(day=1)).strftime("%Y-%m-%d"), Decimal("12000000.00"), "Salary", "Bank BCA", "Monthly salary"),
+                ("income", (today.replace(day=3)).strftime("%Y-%m-%d"), Decimal("2500000.00"), "Freelance", "Bank Mandiri", "Side project"),
+                ("expense", (today.replace(day=2)).strftime("%Y-%m-%d"), Decimal("3000000.00"), "Rent", "Bank BCA", "Apartment rent"),
+                ("expense", (today.replace(day=4)).strftime("%Y-%m-%d"), Decimal("425000.00"), "Groceries", "Cash", "Weekly groceries"),
+                ("expense", (today.replace(day=5)).strftime("%Y-%m-%d"), Decimal("120000.00"), "Transport", "Cash", "Fuel"),
+                ("expense", (today.replace(day=6)).strftime("%Y-%m-%d"), Decimal("185000.00"), "Dining", "Cash", "Dinner with friends"),
+                ("expense", (today.replace(day=7)).strftime("%Y-%m-%d"), Decimal("320000.00"), "Utilities", "Bank BCA", "Electricity bill"),
+            ]
+            for index, (entry_type, date_str, amount, category_name, account_name, description) in enumerate(samples, start=1):
+                category: Category | None = cat_by_name.get(category_name)
+                account: Account | None = accounts_by_name.get(account_name)
+                if category is None or account is None:
+                    continue
+                transaction = Transaction(
+                    id=f"TX{index:04d}",
+                    entry_type=entry_type,
+                    date=date_str,
+                    amount=amount,
+                    category_id=category.id,
+                    account_id=account.id,
+                    description=description,
+                    created_at=self._now(),
+                    updated_at=self._now(),
+                )
+                self._append_entity("Transactions", transaction)
+                created += 1
+        return created
+
     def get_transaction(self, record_id: str) -> Transaction:
         return self._get_entity("Transactions", record_id)
 

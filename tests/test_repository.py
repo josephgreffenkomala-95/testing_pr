@@ -148,3 +148,50 @@ def test_invalid_headers_raise_error(tmp_path):
         pass
     else:
         raise AssertionError("Expected InvalidSheetStructureError")
+
+
+def test_add_multiple_accounts_and_crud(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+    repo.delete_account("ACC0001")
+
+    first = repo.add_account({"name": "Bank BCA", "account_type": "bank", "currency": "IDR", "current_balance": "5000000.00"})
+    second = repo.add_account({"name": "Cash", "account_type": "cash", "currency": "IDR", "current_balance": "250000.00"})
+    third = repo.add_account({"name": "Bank Mandiri", "account_type": "bank", "currency": "IDR", "current_balance": "1200000.00"})
+
+    accounts = repo.load_snapshot().accounts
+    assert {account.name for account in accounts} == {"Bank BCA", "Cash", "Bank Mandiri"}
+    assert first.id != second.id != third.id
+
+    duplicate = False
+    try:
+        repo.add_account({"name": "Bank BCA", "account_type": "bank", "currency": "IDR", "current_balance": "0"})
+    except ValueError:
+        duplicate = True
+    assert duplicate
+
+    updated = repo.update_account(first.id, {"name": "Bank BCA", "account_type": "bank", "currency": "IDR", "current_balance": "7500000.00"})
+    assert updated.current_balance == Decimal("7500000.00")
+
+    repo.delete_account(second.id)
+    remaining = {account.name for account in repo.load_snapshot().accounts}
+    assert remaining == {"Bank BCA", "Bank Mandiri"}
+
+
+def test_seed_dummy_data_populates_sheet(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+    for account in repo.load_snapshot().accounts:
+        repo.delete_account(account.id)
+
+    created = repo.seed_dummy_data()
+    snapshot = repo.load_snapshot()
+
+    assert created > 0
+    assert len(snapshot.accounts) == 3
+    assert len(snapshot.categories) >= 5
+    assert len(snapshot.transactions) == 7
+    assert {account.name for account in snapshot.accounts} == {"Cash", "Bank BCA", "Bank Mandiri"}
+
+    second = repo.seed_dummy_data()
+    assert second == 0

@@ -8,12 +8,12 @@ from rich.panel import Panel
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import DataTable, Footer, Header, Static
 
 from finance_manager.config.auth import run_oauth_flow
 from finance_manager.config.settings import persist_app_state
 from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
-from finance_manager.models.entities import Budget, PlannedTransaction, Snapshot, Transaction
+from finance_manager.models.entities import Account, Budget, PlannedTransaction, Snapshot, Transaction
 from finance_manager.services.sheets import (
     ExternalServiceError,
     FinanceManagerError,
@@ -62,6 +62,24 @@ Footer {
     min-width: 48;
     border: solid #414868;
     background: #24283b;
+}
+DataTable {
+    background: #24283b;
+    color: #c0caf5;
+    scrollbar-background: #1a1b26;
+    scrollbar-color: #414868;
+    & > .datatable--header {
+        background: #1a1b26;
+        color: #7aa2f7;
+        text-style: bold;
+    }
+    & > .datatable--cursor {
+        background: #2ac3de;
+        color: #1a1b26;
+    }
+    & > .datatable--hover {
+        background: #414868;
+    }
 }
 #detail {
     width: 40;
@@ -116,12 +134,6 @@ class RowRef:
     subtitle: str
 
 
-class FinanceListItem(ListItem):
-    def __init__(self, row: RowRef) -> None:
-        super().__init__(Label(f"{row.title}\n{row.subtitle}"))
-        self.row = row
-
-
 class FinanceManagerApp(App[None]):
     CSS = TOKYONIGHT_CSS
 
@@ -130,11 +142,13 @@ class FinanceManagerApp(App[None]):
         Binding("2", "switch_view('planned')", "Planned"),
         Binding("3", "switch_view('budgets')", "Budgets"),
         Binding("4", "switch_view('projection')", "Projection"),
-        Binding("5", "switch_view('setup')", "Setup"),
+        Binding("5", "switch_view('accounts')", "Accounts"),
+        Binding("6", "switch_view('setup')", "Setup"),
         Binding("a", "add_record", "Add"),
         Binding("e", "edit_record", "Edit"),
         Binding("d", "delete_record", "Delete"),
         Binding("r", "reload_data", "Reload"),
+        Binding("s", "seed_dummy", "Seed Data"),
         Binding("l", "login", "Login"),
         Binding("o", "open_sheet", "Open Sheet"),
         Binding("q", "quit", "Quit"),
@@ -146,6 +160,7 @@ class FinanceManagerApp(App[None]):
         self.snapshot = Snapshot([], [], [], [], [], {})
         self.current_view = "transactions"
         self.current_rows: list[RowRef] = []
+        self.row_keys: list[str] = []
         self.error_message = ""
         self.authenticated = False
 
@@ -156,7 +171,7 @@ class FinanceManagerApp(App[None]):
             with Vertical(id="main"):
                 yield Static(id="tabs")
                 with Horizontal(id="body"):
-                    yield ListView(id="record-list")
+                    yield DataTable(id="record-list")
                     yield Static(id="detail")
                 yield Static(id="status")
         yield Footer()
@@ -272,12 +287,34 @@ class FinanceManagerApp(App[None]):
         self.query_one("#tabs", Static).update(self._render_tabs())
         self.query_one("#sidebar", Static).update(self._render_sidebar())
         self.current_rows = self._rows_for_current_view()
-        list_view = self.query_one("#record-list", ListView)
-        list_view.clear()
+        table = self.query_one("#record-list", DataTable)
+        table.clear(columns=True)
+        columns = self._table_columns()
+        for column in columns:
+            table.add_column(column)
+        self.row_keys = []
         for row in self.current_rows:
-            list_view.append(FinanceListItem(row))
+            cells = row.subtitle.split(" | ")
+            key = row.record_id
+            table.add_row(*cells, key=key)
+            self.row_keys.append(key)
+        if self.row_keys and table.row_count > 0:
+            table.move_cursor(row=0)
         self._update_detail()
         self.query_one("#status", Static).update(status_message)
+
+    def _table_columns(self) -> list[str]:
+        if self.current_view == "transactions":
+            return ["Date", "Type", "Amount", "Category", "Account", "Description"]
+        if self.current_view == "planned":
+            return ["Expected date", "Status", "Type", "Amount", "Category", "Description"]
+        if self.current_view == "budgets":
+            return ["Category", "Type", "Budgeted", "Actual", "Planned", "Remaining"]
+        if self.current_view == "projection":
+            return ["Label", "Balance", "Change"]
+        if self.current_view == "accounts":
+            return ["ID", "Name", "Type", "Currency", "Balance", "Active"]
+        return ["Title", "Subtitle"]
 
     def _render_tabs(self) -> str:
         items = [
@@ -285,7 +322,8 @@ class FinanceManagerApp(App[None]):
             ("planned", "2 Planned"),
             ("budgets", "3 Budgets"),
             ("projection", "4 Projection"),
-            ("setup", "5 Setup"),
+            ("accounts", "5 Accounts"),
+            ("setup", "6 Setup"),
         ]
         return "   ".join(
             f"[{label}]" if key == self.current_view else label
@@ -335,37 +373,28 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=item.id,
-                    title=f"{item.date}  {item.entry_type.upper()}  {item.amount:.2f}",
-                    subtitle=f"{categories.get(item.category_id, item.category_id)} · {accounts.get(item.account_id, item.account_id)} · {item.description}",
+                    title=f"{item.date} {item.entry_type.upper()} {item.amount:.2f}",
+                    subtitle=f"{item.date} | {item.entry_type.upper()} | {item.amount:.2f} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}",
                 )
                 for item in items
             ]
         if self.current_view == "planned":
-            items = sorted(self.snapshot.planned_transactions, key=lambda item: item.expected_date or "9999-99-99")
+            planned_items = sorted(self.snapshot.planned_transactions, key=lambda item: item.expected_date or "9999-99-99")
             return [
                 RowRef(
                     record_id=item.id,
-                    title=f"{item.expected_date or 'No date'}  {item.status.upper()}  {item.amount:.2f}",
-                    subtitle=f"{item.entry_type} · {categories.get(item.category_id, item.category_id)} · {item.description}",
+                    title=f"{item.expected_date or 'No date'} {item.status.upper()} {item.amount:.2f}",
+                    subtitle=f"{item.expected_date or 'No date'} | {item.status.upper()} | {item.entry_type} | {item.amount:.2f} | {categories.get(item.category_id, item.category_id)} | {item.description}",
                 )
-                for item in items
+                for item in planned_items
             ]
         if self.current_view == "budgets":
-            budgets_by_id = {budget.id: budget for budget in self.snapshot.budgets if budget.month == current_month()}
             report = month_budget_report(self.snapshot, current_month())
             return [
                 RowRef(
-                    record_id=next(
-                        (
-                            budget.id
-                            for budget in budgets_by_id.values()
-                            if budget.category_id == self._category_id_for_name(row.category_name)
-                            and budget.entry_type == row.entry_type
-                        ),
-                        row.category_name,
-                    ),
-                    title=f"{row.category_name}  budget {row.budgeted:.2f}",
-                    subtitle=f"actual {row.actual:.2f} · planned {row.planned:.2f} · remaining {row.projected_remaining:.2f}",
+                    record_id=self._budget_id_for(row.category_name, row.entry_type) or row.category_name,
+                    title=f"{row.category_name} budget {row.budgeted:.2f}",
+                    subtitle=f"{row.category_name} | {row.entry_type} | {row.budgeted:.2f} | {row.actual:.2f} | {row.planned:.2f} | {row.projected_remaining:.2f}",
                 )
                 for row in report
             ]
@@ -374,10 +403,19 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=str(index),
-                    title=f"{point.label}  balance {point.balance:.2f}",
-                    subtitle=f"change {point.change:+.2f}",
+                    title=f"{point.label} balance {point.balance:.2f}",
+                    subtitle=f"{point.label} | {point.balance:.2f} | {point.change:+.2f}",
                 )
                 for index, point in enumerate(daily)
+            ]
+        if self.current_view == "accounts":
+            return [
+                RowRef(
+                    record_id=account.id,
+                    title=f"{account.name} {account.current_balance:.2f} {account.currency}",
+                    subtitle=f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {account.current_balance:.2f} | {'yes' if account.is_active else 'no'}",
+                )
+                for account in self.snapshot.accounts
             ]
         setup_lines = self._setup_rows()
         return [RowRef(str(index), title, subtitle) for index, (title, subtitle) in enumerate(setup_lines)]
@@ -407,10 +445,10 @@ class FinanceManagerApp(App[None]):
         return rows
 
     def _selected_row(self) -> RowRef | None:
-        list_view = self.query_one("#record-list", ListView)
-        if list_view.index is None or list_view.index >= len(self.current_rows):
+        table = self.query_one("#record-list", DataTable)
+        if table.cursor_row is None or table.cursor_row >= len(self.current_rows):
             return self.current_rows[0] if self.current_rows else None
-        return self.current_rows[list_view.index]
+        return self.current_rows[table.cursor_row]
 
     def _update_detail(self) -> None:
         row = self._selected_row()
@@ -418,9 +456,9 @@ class FinanceManagerApp(App[None]):
         if row is None:
             detail.update(Panel("No records yet.\nPress `a` to add one.", title="Details"))
             return
-        detail.update(Panel(f"{row.title}\n\n{row.subtitle}", title="Details"))
+        detail.update(Panel(f"{row.title}\n\n{row.subtitle.replace(' | ', ' · ')}", title="Details"))
 
-    def on_list_view_highlighted(self, _event: ListView.Highlighted) -> None:
+    def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
         self._update_detail()
 
     def action_switch_view(self, view: str) -> None:
@@ -451,8 +489,10 @@ class FinanceManagerApp(App[None]):
             self._open_planned_form()
         elif self.current_view == "budgets":
             self._open_budget_form()
+        elif self.current_view == "accounts":
+            self._open_account_form()
         else:
-            self.query_one("#status", Static).update("Add is available in Transactions, Planned, and Budgets.")
+            self.query_one("#status", Static).update("Add is available in Transactions, Planned, Budgets, and Accounts.")
 
     def action_edit_record(self) -> None:
         row = self._selected_row()
@@ -463,12 +503,16 @@ class FinanceManagerApp(App[None]):
             record = self.repository.get_transaction(row.record_id)
             self._open_transaction_form(record=record)
         elif self.current_view == "planned":
-            record = self.repository.get_planned_transaction(row.record_id)
-            self._open_planned_form(record=record)
+            planned = self.repository.get_planned_transaction(row.record_id)
+            self._open_planned_form(record=planned)
         elif self.current_view == "budgets":
             budget = next((item for item in self.snapshot.budgets if item.id == row.record_id), None)
             if budget:
                 self._open_budget_form(record=budget)
+        elif self.current_view == "accounts":
+            account = next((item for item in self.snapshot.accounts if item.id == row.record_id), None)
+            if account:
+                self._open_account_form(record=account)
         else:
             self.query_one("#status", Static).update("Edit is not available in this view.")
 
@@ -486,12 +530,24 @@ class FinanceManagerApp(App[None]):
                 budget = next((item for item in self.snapshot.budgets if item.id == row.record_id), None)
                 if budget:
                     self.repository.delete_budget(budget.id)
+            elif self.current_view == "accounts":
+                account = next((item for item in self.snapshot.accounts if item.id == row.record_id), None)
+                if account:
+                    self.repository.delete_account(account.id)
             else:
                 self.query_one("#status", Static).update("Delete is not available in this view.")
                 return
             self.snapshot = self.repository.load_snapshot()
             self._refresh_ui("Deleted record.")
         except (FinanceManagerError, KeyError) as exc:
+            self.query_one("#status", Static).update(str(exc))
+
+    def action_seed_dummy(self) -> None:
+        try:
+            created = self.repository.seed_dummy_data()
+            self.snapshot = self.repository.load_snapshot()
+            self._refresh_ui(f"Seeded {created} sample rows.")
+        except FinanceManagerError as exc:
             self.query_one("#status", Static).update(str(exc))
 
     def _open_transaction_form(self, record: Transaction | None = None) -> None:
@@ -542,6 +598,32 @@ class FinanceManagerApp(App[None]):
             RecordFormScreen("Monthly budget", fields),
             lambda data: self._save_budget_form(data, record.id if record else None),
         )
+
+    def _open_account_form(self, record: Account | None = None) -> None:
+        fields = [
+            FormField("name", "Account name", "Bank BCA", record.name if record else ""),
+            FormField("account_type", "Type", "cash / bank / ewallet", record.account_type if record else "cash"),
+            FormField("currency", "Currency", "IDR", record.currency if record else "IDR"),
+            FormField("current_balance", "Current balance", "1000000.00", f"{record.current_balance:.2f}" if record else "0.00"),
+        ]
+        self.push_screen(
+            RecordFormScreen("Bank account", fields, hint="Add multiple accounts to track them separately."),
+            lambda data: self._save_account_form(data, record.id if record else None),
+        )
+
+    def _save_account_form(self, data: dict[str, str] | None, record_id: str | None) -> None:
+        if data is None:
+            self.query_one("#status", Static).update("Cancelled.")
+            return
+        try:
+            if record_id:
+                self.repository.update_account(record_id, data)
+            else:
+                self.repository.add_account(data)
+            self.snapshot = self.repository.load_snapshot()
+            self._refresh_ui("Saved account.")
+        except (FinanceManagerError, ValueError, KeyError) as exc:
+            self.query_one("#status", Static).update(str(exc))
 
     def _save_transaction_form(self, data: dict[str, str] | None, record_id: str | None) -> None:
         if data is None:
@@ -596,6 +678,13 @@ class FinanceManagerApp(App[None]):
             if category.name == category_name:
                 return category.id
         return category_name
+
+    def _budget_id_for(self, category_name: str, entry_type: str) -> str:
+        category_id = self._category_id_for_name(category_name)
+        for budget in self.snapshot.budgets:
+            if budget.month == current_month() and budget.category_id == category_id and budget.entry_type == entry_type:
+                return budget.id
+        return ""
 
     def _account_name(self, account_id: str) -> str:
         for account in self.snapshot.accounts:
