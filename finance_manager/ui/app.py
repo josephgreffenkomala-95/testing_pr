@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import webbrowser
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -135,6 +136,7 @@ class FinanceManagerApp(App[None]):
         Binding("d", "delete_record", "Delete"),
         Binding("r", "reload_data", "Reload"),
         Binding("l", "login", "Login"),
+        Binding("o", "open_sheet", "Open Sheet"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -293,10 +295,15 @@ class FinanceManagerApp(App[None]):
         month = current_month()
         budget_rows = month_budget_report(self.snapshot, month)
         overspent = sum(1 for row in budget_rows if row.is_projected_overspent)
+        url = self.repository.spreadsheet_url()
         lines = [
             "Finance",
             "",
             f"Sheet: {self.repository.config.spreadsheet_title}",
+        ]
+        if url:
+            lines.append(f"URL: {url}")
+        lines.extend([
             f"Accounts: {len(self.snapshot.accounts)}",
             f"Categories: {len(self.snapshot.categories)}",
             f"Balance: {balance:.2f}",
@@ -311,8 +318,9 @@ class FinanceManagerApp(App[None]):
             "e edit",
             "d delete",
             "r reload",
+            "o open sheet",
             "q quit",
-        ]
+        ])
         if self.error_message:
             lines.extend(["", "Status", self.error_message[:120]])
         return "\n".join(lines)
@@ -373,6 +381,7 @@ class FinanceManagerApp(App[None]):
         return [RowRef(str(index), title, subtitle) for index, (title, subtitle) in enumerate(setup_lines)]
 
     def _setup_rows(self) -> list[tuple[str, str]]:
+        url = self.repository.spreadsheet_url()
         if self.error_message:
             return [
                 ("Credentials or connectivity issue", self.error_message),
@@ -385,12 +394,14 @@ class FinanceManagerApp(App[None]):
                     "Use the Login button to run the Google OAuth flow, then pick a spreadsheet.",
                 ),
             ]
-        return [
+        rows = [
             ("Spreadsheet ID", self.repository.config.spreadsheet_id or "Stored after first successful bootstrap"),
+            ("Spreadsheet URL", url or "(available once a sheet is opened)"),
             ("OAuth client file", str(self.repository.config.oauth_client_secret_path)),
             ("OAuth token file", str(self.repository.config.oauth_token_path)),
             ("Current title", self.repository.config.spreadsheet_title),
         ]
+        return rows
 
     def _selected_row(self) -> RowRef | None:
         list_view = self.query_one("#record-list", ListView)
@@ -418,6 +429,17 @@ class FinanceManagerApp(App[None]):
 
     def action_login(self) -> None:
         self.push_screen(LoginScreen(), self._on_login_result)
+
+    def action_open_sheet(self) -> None:
+        url = self.repository.spreadsheet_url()
+        if not url:
+            self.query_one("#status", Static).update("No spreadsheet is open yet.")
+            return
+        try:
+            webbrowser.open(url, new=2)
+            self.query_one("#status", Static).update("Opened spreadsheet in browser.")
+        except webbrowser.Error as exc:
+            self.query_one("#status", Static).update(f"Could not open browser: {exc}")
 
     def action_add_record(self) -> None:
         if self.current_view == "transactions":
