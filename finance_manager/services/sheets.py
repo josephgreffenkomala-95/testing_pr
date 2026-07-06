@@ -283,9 +283,13 @@ class GoogleSheetsRepository:
         current = next((item for item in self._read_entities("Accounts") if item.id == record_id), None)
         if current is None:
             raise KeyError(record_id)
+        new_name = data["name"].strip() or current.name
+        for account in self._read_entities("Accounts"):
+            if account.id != record_id and account.name.lower() == new_name.lower():
+                raise ValueError(f"Account '{new_name}' already exists.")
         updated = replace(
             current,
-            name=data["name"].strip() or current.name,
+            name=new_name,
             account_type=data.get("account_type", current.account_type).strip().lower() or current.account_type,
             currency=data.get("currency", current.currency).strip().upper() or current.currency,
             current_balance=_require_amount(data.get("current_balance", f"{current.current_balance:.2f}")),
@@ -319,9 +323,9 @@ class GoogleSheetsRepository:
                 created += 1
         accounts = self._read_entities("Accounts")
         needed_categories = ["Salary", "Freelance", "Groceries", "Rent", "Transport", "Dining", "Utilities"]
-        existing_category_names = {category.name for category in self._read_entities("Categories")}
+        existing_category_names = {category.name.lower() for category in self._read_entities("Categories")}
         for name in needed_categories:
-            if name in existing_category_names:
+            if name.lower() in existing_category_names:
                 continue
             entry_type = "income" if name in {"Salary", "Freelance"} else "expense"
             category = Category(self._next_id("Categories", "CAT"), name, entry_type, True)

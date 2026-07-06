@@ -287,11 +287,8 @@ class FinanceManagerApp(App[None]):
             key = row.record_id
             table.add_row(*cells, key=key)
             self.row_keys.append(key)
-        if self.row_keys:
-            try:
-                table.move_cursor(row=0)
-            except Exception:
-                pass
+        if self.row_keys and table.row_count > 0:
+            table.move_cursor(row=0)
         self._update_detail()
         self.query_one("#status", Static).update(status_message)
 
