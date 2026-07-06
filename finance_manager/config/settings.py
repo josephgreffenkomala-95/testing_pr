@@ -38,7 +38,7 @@ def load_app_config() -> AppConfig:
     oauth_client_secret_path = Path(
         os.environ.get(
             "FINANCE_MANAGER_OAUTH_CLIENT_SECRET",
-            str(config_dir / "google-oauth-client-secret.json"),
+            stored.get("oauth_client_secret_path", str(config_dir / "google-oauth-client-secret.json")),
         )
     ).expanduser()
     oauth_token_path = Path(
@@ -72,4 +72,6 @@ def persist_app_state(config: AppConfig, **updates: Any) -> None:
         current = json.loads(config.config_path.read_text())
     current.setdefault("spreadsheet_title", config.spreadsheet_title)
     current.update(updates)
+    if "oauth_client_secret_path" in updates:
+        current["oauth_client_secret_path"] = str(updates["oauth_client_secret_path"])
     config.config_path.write_text(json.dumps(current, indent=2))

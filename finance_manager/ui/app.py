@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from finance_manager.config.auth import run_oauth_flow
+from finance_manager.config.settings import persist_app_state
 from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
 from finance_manager.models.entities import Budget, PlannedTransaction, Snapshot, Transaction
 from finance_manager.services.sheets import (
@@ -190,6 +191,7 @@ class FinanceManagerApp(App[None]):
             self.repository.config,
             oauth_client_secret_path=secret_path,
         )
+        persist_app_state(self.repository.config, oauth_client_secret_path=str(secret_path))
         if not secret_path.exists():
             self.error_message = f"Client secret file not found: {secret_path}"
             self._refresh_ui(self.error_message)
