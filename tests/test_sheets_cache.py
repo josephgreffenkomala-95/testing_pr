@@ -101,7 +101,7 @@ def test_clear_cache_allows_external_changes_to_be_visible(tmp_path):
     assert snapshot3.transactions[0].description == "External"
 
 
-def test_cache_is_cleared_on_write_operations(tmp_path):
+def test_cache_is_updated_on_write_operations(tmp_path):
     repo = build_repo(tmp_path)
     repo.bootstrap()
 
@@ -117,7 +117,9 @@ def test_cache_is_cleared_on_write_operations(tmp_path):
         "account": "Cash",
         "notes": "",
     })
-    assert repo._cache is None
+    assert repo._cache is not None
+    assert len(repo._cache.transactions) == 1
+    assert repo._cache.transactions[0].description == "First"
 
     snapshot2 = repo.load_snapshot()
     assert repo._cache is not None
