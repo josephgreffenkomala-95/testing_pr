@@ -2,6 +2,8 @@
 
 `finance-manager` is a personal finance CLI application with a Textual TUI and Google Sheets as its storage backend. On first run it can create the spreadsheet automatically, initialize a normalized multi-sheet structure, and then use that sheet as the app database.
 
+The TUI uses a Tokyonight dark theme and walks first-time users through an in-app OAuth setup flow: a setup screen for the missing client secret, a login screen to trigger the Google OAuth flow, and a spreadsheet picker once authenticated.
+
 ## Features
 
 - Track income and expenses with date, amount, category, description, account, and optional notes.
@@ -9,6 +11,8 @@
 - Maintain monthly budgets per category and compare actual and planned spending against them.
 - View a balance timeline and monthly cash projection from current account balances plus planned cash movements.
 - Keep the data inspectable in Google Sheets with separate tabs for `Transactions`, `Planned Transactions`, `Budgets`, `Categories`, `Accounts`, and `Settings`.
+- Tokyonight dark theme across the main app, forms, and modal screens.
+- First-run guided OAuth setup: setup screen for the client secret, login screen for OAuth, and a spreadsheet picker once authenticated.
 
 ## Installation
 
@@ -67,7 +71,7 @@ Optional environment variables:
 - `FINANCE_MANAGER_SPREADSHEET_TITLE`
 - `FINANCE_MANAGER_SPREADSHEET_ID`
 
-The app stores local state in `~/.config/finance-manager/config.json`, including the last known spreadsheet ID.
+The default config directory follows the XDG Base Directory Specification: it uses `$XDG_CONFIG_HOME/finance-manager` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/finance-manager`. The app stores local state in `config.json` inside that directory, including the last known spreadsheet ID.
 
 After `finance-manager auth`, run:
 
@@ -100,7 +104,14 @@ The schema is normalized: records store `category_id` and `account_id`, while th
 - `e` Edit selected record
 - `d` Delete selected record
 - `r` Reload from Google Sheets
+- `l` Login (re-run the OAuth flow)
 - `q` Quit
+
+## First-Run Flow
+
+1. If the OAuth client secret is missing, the app opens a **Setup** screen prompting for the path to your downloaded `client_secret.json`.
+2. After the secret is in place, a **Login** screen starts the Google OAuth flow in your browser.
+3. Once authenticated, a **Spreadsheet picker** lists your Google Sheets. Pick one to use as the database, or, if you have none, the app bootstraps a fresh sheet automatically.
 
 ## Error Handling
 
