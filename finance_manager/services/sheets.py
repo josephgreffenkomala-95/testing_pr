@@ -83,6 +83,18 @@ class GoogleSheetsRepository:
             persist_app_state(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=self.config.spreadsheet_title)
         return spreadsheet_id or ""
 
+    def list_spreadsheets(self) -> list[tuple[str, str]]:
+        client = self._get_client()
+        try:
+            spreadsheets = client.openall()
+        except Exception as exc:
+            raise ExternalServiceError(str(exc)) from exc
+        return [(getattr(spreadsheet, "id", ""), getattr(spreadsheet, "title", "")) for spreadsheet in spreadsheets]
+
+    def use_spreadsheet(self, spreadsheet_id: str, title: str = "") -> str:
+        self.config = replace(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=title or spreadsheet_id)
+        return self.bootstrap()
+
     def load_snapshot(self) -> Snapshot:
         self._require_ready()
         return Snapshot(

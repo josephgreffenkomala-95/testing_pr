@@ -6,8 +6,9 @@ from rich.panel import Panel
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
+from finance_manager.config.auth import run_oauth_flow
 from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
 from finance_manager.models.entities import Budget, PlannedTransaction, Snapshot, Transaction
 from finance_manager.services.sheets import (
@@ -17,6 +18,91 @@ from finance_manager.services.sheets import (
     MissingCredentialsError,
 )
 from finance_manager.ui.forms import FormField, RecordFormScreen
+from finance_manager.ui.screens import LoginScreen, SheetRef, SheetSelectScreen
+
+
+TOKYONIGHT_CSS = """
+Screen {
+    background: #1a1b26;
+    color: #c0caf5;
+}
+Header {
+    background: #7aa2f7;
+    color: #1a1b26;
+}
+Footer {
+    background: #24283b;
+    color: #9aa5ce;
+}
+#sidebar {
+    width: 30;
+    padding: 1 2;
+    background: #24283b;
+    color: #9aa5ce;
+    border-right: solid #414868;
+}
+#main {
+    padding: 1;
+}
+#tabs {
+    height: 3;
+    content-align: left middle;
+    color: #7aa2f7;
+    text-style: bold;
+}
+#body {
+    height: 1fr;
+}
+#record-list {
+    width: 1fr;
+    min-width: 48;
+    border: solid #414868;
+    background: #24283b;
+}
+#detail {
+    width: 40;
+    padding: 1;
+    border: solid #414868;
+    background: #24283b;
+    color: #c0caf5;
+}
+#status {
+    height: 3;
+    padding: 0 1;
+    color: #9aa5ce;
+}
+#form-modal {
+    width: 72;
+    height: auto;
+    padding: 1 2;
+    background: #24283b;
+    border: round #7aa2f7;
+}
+.form-title {
+    text-style: bold;
+    color: #7aa2f7;
+    margin-bottom: 1;
+}
+.form-label {
+    margin-top: 1;
+    color: #9aa5ce;
+}
+.form-hint {
+    color: #565f89;
+}
+.form-buttons {
+    margin-top: 1;
+    height: auto;
+}
+ListView > ListItem {
+    background: #24283b;
+    color: #c0caf5;
+}
+ListView > ListItem.--highlight {
+    background: #2ac3de;
+    color: #1a1b26;
+}
+"""
 
 
 @dataclass
@@ -33,90 +119,7 @@ class FinanceListItem(ListItem):
 
 
 class FinanceManagerApp(App[None]):
-    CSS = """
-    Screen {
-        background: #f4efe5;
-        color: #231f20;
-    }
-    Header {
-        background: #8f3b1b;
-        color: #fff8f0;
-    }
-    Footer {
-        background: #231f20;
-        color: #f7f1e3;
-    }
-    #sidebar {
-        width: 30;
-        padding: 1 2;
-        background: #e0d3bf;
-        color: #36281d;
-    }
-    #main {
-        padding: 1;
-    }
-    #tabs {
-        height: 3;
-        content-align: left middle;
-        color: #8f3b1b;
-        text-style: bold;
-    }
-    #body {
-        height: 1fr;
-    }
-    #record-list {
-        width: 1fr;
-        min-width: 48;
-        border: solid #b88a5a;
-        background: #fffaf2;
-    }
-    #detail {
-        width: 40;
-        padding: 1;
-        border: solid #b88a5a;
-        background: #f8f2e8;
-    }
-    #status {
-        height: 3;
-        padding: 0 1;
-        color: #6c4d31;
-    }
-    #login, #logout {
-        margin-top: 1;
-        background: #8f3b1b;
-        color: #fff8f0;
-        border: round #6c4d31;
-    }
-    #logout {
-        background: #6c4d31;
-    }
-    #form-modal {
-        width: 72;
-        height: auto;
-        padding: 1 2;
-        background: #fff8f0;
-        border: round #8f3b1b;
-    }
-    .form-title {
-        text-style: bold;
-        color: #8f3b1b;
-        margin-bottom: 1;
-    }
-    .form-label {
-        margin-top: 1;
-    }
-    .form-hint {
-        color: #6c4d31;
-    }
-    .form-buttons {
-        margin-top: 1;
-        height: auto;
-    }
-    .auth-buttons {
-        margin-top: 1;
-        height: auto;
-    }
-    """
+    CSS = TOKYONIGHT_CSS
 
     BINDINGS = [
         Binding("1", "switch_view('transactions')", "Transactions"),
@@ -128,8 +131,6 @@ class FinanceManagerApp(App[None]):
         Binding("e", "edit_record", "Edit"),
         Binding("d", "delete_record", "Delete"),
         Binding("r", "reload_data", "Reload"),
-        Binding("l", "login", "Login"),
-        Binding("o", "logout", "Logout"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -140,6 +141,7 @@ class FinanceManagerApp(App[None]):
         self.current_view = "transactions"
         self.current_rows: list[RowRef] = []
         self.error_message = ""
+        self.authenticated = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -151,12 +153,62 @@ class FinanceManagerApp(App[None]):
                     yield ListView(id="record-list")
                     yield Static(id="detail")
                 yield Static(id="status")
-                with Horizontal(classes="auth-buttons"):
-                    yield Button("Login", id="login", variant="primary")
-                    yield Button("Logout", id="logout")
         yield Footer()
 
     def on_mount(self) -> None:
+        if not self._has_credentials():
+            self.push_screen(LoginScreen(), self._on_login_result)
+        else:
+            self._try_authenticate()
+
+    def _has_credentials(self) -> bool:
+        return self.repository.config.oauth_client_secret_path.exists()
+
+    def _try_authenticate(self) -> None:
+        try:
+            self.repository.bootstrap()
+            self.authenticated = True
+            self._load_data(initial=True)
+        except MissingCredentialsError:
+            self.push_screen(LoginScreen(), self._on_login_result)
+        except (InvalidSheetStructureError, ExternalServiceError) as exc:
+            self.error_message = str(exc)
+            self._refresh_ui(self.error_message)
+
+    def _on_login_result(self, proceed: bool | None) -> None:
+        if not proceed:
+            self.app.exit("Login cancelled.")
+            return
+        try:
+            run_oauth_flow(self.repository.config)
+        except Exception as exc:
+            self.error_message = f"OAuth failed: {exc}"
+            self._refresh_ui(self.error_message)
+            return
+        try:
+            sheets = self.repository.list_spreadsheets()
+        except Exception as exc:
+            self.error_message = f"Could not list spreadsheets: {exc}"
+            self._refresh_ui(self.error_message)
+            return
+        if not sheets:
+            self.repository.bootstrap()
+            self.authenticated = True
+            self._load_data(initial=True)
+            return
+        self.push_screen(SheetSelectScreen(sheets), self._on_sheet_selected)
+
+    def _on_sheet_selected(self, sheet: SheetRef | None) -> None:
+        if sheet is None:
+            self.app.exit("No spreadsheet selected.")
+            return
+        try:
+            self.repository.use_spreadsheet(sheet.spreadsheet_id, sheet.title)
+        except Exception as exc:
+            self.error_message = f"Could not open spreadsheet: {exc}"
+            self._refresh_ui(self.error_message)
+            return
+        self.authenticated = True
         self._load_data(initial=True)
 
     def _load_data(self, *, initial: bool = False) -> None:
@@ -287,7 +339,7 @@ class FinanceManagerApp(App[None]):
                 ),
                 (
                     "Auth help",
-                    "Create a Google Desktop OAuth client, place the client JSON at the configured path, then run `finance-manager auth`.",
+                    "Use the Login button to run the Google OAuth flow, then pick a spreadsheet.",
                 ),
             ]
         return [
@@ -320,21 +372,6 @@ class FinanceManagerApp(App[None]):
 
     def action_reload_data(self) -> None:
         self._load_data()
-
-    def action_login(self) -> None:
-        self._load_data(initial=True)
-        self.query_one("#status", Static).update("Login attempted." if self.error_message else "Logged in.")
-
-    def action_logout(self) -> None:
-        self.error_message = "Logged out."
-        self.current_view = "setup"
-        self._refresh_ui("Logged out.")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "login":
-            self.action_login()
-        elif event.button.id == "logout":
-            self.action_logout()
 
     def action_add_record(self) -> None:
         if self.current_view == "transactions":

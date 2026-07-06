@@ -8,6 +8,47 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
 
 
+TOKYONIGHT_FORM_CSS = """
+#form-modal {
+    background: #24283b;
+    color: #c0caf5;
+}
+.form-title {
+    color: #7aa2f7;
+}
+.form-label {
+    color: #9aa5ce;
+}
+.form-hint {
+    color: #565f89;
+}
+Input {
+    background: #1a1b26;
+    color: #c0caf5;
+    border: solid #414868;
+}
+Input:focus {
+    border: solid #7aa2f7;
+}
+Input.--placeholder {
+    color: #565f89;
+}
+Button {
+    background: #414868;
+    color: #c0caf5;
+    border: solid #414868;
+}
+Button#save {
+    background: #7aa2f7;
+    color: #1a1b26;
+}
+Button:hover {
+    background: #7aa2f7;
+    color: #1a1b26;
+}
+"""
+
+
 @dataclass(frozen=True)
 class FormField:
     name: str
@@ -17,6 +58,8 @@ class FormField:
 
 
 class RecordFormScreen(ModalScreen[dict[str, str] | None]):
+    DEFAULT_CSS = TOKYONIGHT_FORM_CSS
+
     def __init__(self, title: str, fields: list[FormField], hint: str = "") -> None:
         super().__init__()
         self.title = title
