@@ -133,6 +133,7 @@ class FinanceManagerApp(App[None]):
         Binding("e", "edit_record", "Edit"),
         Binding("d", "delete_record", "Delete"),
         Binding("r", "reload_data", "Reload"),
+        Binding("l", "login", "Login"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -173,9 +174,12 @@ class FinanceManagerApp(App[None]):
 
     def _try_authenticate(self) -> None:
         try:
-            self.repository.bootstrap()
-            self.authenticated = True
-            self._load_data(initial=True)
+            if self.repository.config.spreadsheet_id:
+                self.repository.bootstrap()
+                self.authenticated = True
+                self._load_data(initial=True)
+            else:
+                self._enter_main_app()
         except MissingCredentialsError:
             self.push_screen(LoginScreen(), self._on_login_result)
         except (InvalidSheetStructureError, ExternalServiceError) as exc:
@@ -209,6 +213,15 @@ class FinanceManagerApp(App[None]):
             self.error_message = f"OAuth failed: {exc}"
             self._refresh_ui(self.error_message)
             return
+        self._enter_main_app()
+
+    def _enter_main_app(self) -> None:
+        """Called after OAuth completes (or on mount when already authed).
+
+        Lists the user's spreadsheets and asks them to pick one; if there are
+        none, bootstraps a fresh sheet. Ensures the Login/Setup screen is
+        dismissed and the main view is refreshed.
+        """
         try:
             sheets = self.repository.list_spreadsheets()
         except Exception as exc:
@@ -216,7 +229,12 @@ class FinanceManagerApp(App[None]):
             self._refresh_ui(self.error_message)
             return
         if not sheets:
-            self.repository.bootstrap()
+            try:
+                self.repository.bootstrap()
+            except Exception as exc:
+                self.error_message = f"Could not create spreadsheet: {exc}"
+                self._refresh_ui(self.error_message)
+                return
             self.authenticated = True
             self._load_data(initial=True)
             return
@@ -396,6 +414,9 @@ class FinanceManagerApp(App[None]):
 
     def action_reload_data(self) -> None:
         self._load_data()
+
+    def action_login(self) -> None:
+        self.push_screen(LoginScreen(), self._on_login_result)
 
     def action_add_record(self) -> None:
         if self.current_view == "transactions":
