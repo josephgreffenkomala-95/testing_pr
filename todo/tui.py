@@ -17,6 +17,44 @@ from .core import (
 )
 
 
+def _tui_color_pair(priority):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return 0
+
+
+def _tui_addstr(stdscr, y, x, text, attr=0):
+    """Legacy compatibility shim for the previous curses TUI."""
+    try:
+        stdscr.addstr(y, x, text, attr)
+    except TypeError:
+        stdscr.addstr(y, x, text)
+
+
+def _tui_render(*args, **kwargs):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return None
+
+
+def _tui_prompt(*args, **kwargs):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return None
+
+
+def _tui_handle_mouse(*args, **kwargs):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return None
+
+
+def _tui_help(*args, **kwargs):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return None
+
+
+def _tui_item_detail(*args, **kwargs):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return None
+
+
 def _tui_item_line(item):
     status = "x" if item["done"] else " "
     priority = item.get("priority", "medium")
@@ -419,3 +457,8 @@ class TodoApp(App[bool]):
 def run_tui(todo_list):
     app = TodoApp(todo_list)
     return app.run()
+
+
+def _tui_main(todo_list):
+    """Legacy compatibility shim for the previous curses TUI."""
+    return run_tui(todo_list)
