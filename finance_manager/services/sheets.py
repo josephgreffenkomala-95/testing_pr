@@ -334,9 +334,6 @@ class GoogleSheetsRepository:
         raise KeyError(record_id)
 
     def seed_dummy_data(self) -> int:
-        """Populate the sheet with sample accounts, categories, budgets and
-        transactions when it is empty. Returns the number of rows created.
-        """
         snapshot = self.load_snapshot()
         created = 0
         if not snapshot.accounts:
@@ -348,9 +345,10 @@ class GoogleSheetsRepository:
             for account in accounts:
                 self._append_entity("Accounts", account)
                 created += 1
-        accounts = self._read_entities("Accounts")
+            snapshot = self.load_snapshot()
+        accounts = snapshot.accounts
         needed_categories = ["Salary", "Freelance", "Groceries", "Rent", "Transport", "Dining", "Utilities"]
-        existing_category_names = {category.name.lower() for category in self._read_entities("Categories")}
+        existing_category_names = {category.name.lower() for category in snapshot.categories}
         for name in needed_categories:
             if name.lower() in existing_category_names:
                 continue
@@ -358,12 +356,12 @@ class GoogleSheetsRepository:
             category = Category(self._next_id("Categories", "CAT"), name, entry_type, True)
             self._append_entity("Categories", category)
             created += 1
-        categories = self._read_entities("Categories")
+        snapshot = self.load_snapshot()
+        categories = snapshot.categories
         cat_by_name = {category.name: category for category in categories}
         accounts_by_name = {account.name: account for account in accounts}
         month = datetime.now(UTC).strftime("%Y-%m")
-        existing_budgets = self._read_entities("Budgets")
-        if not existing_budgets:
+        if not snapshot.budgets:
             budgets = [
                 ("Groceries", "expense", Decimal("1500000.00")),
                 ("Rent", "expense", Decimal("3000000.00")),
@@ -384,8 +382,7 @@ class GoogleSheetsRepository:
                 )
                 self._append_entity("Budgets", budget)
                 created += 1
-        existing_tx = self._read_entities("Transactions")
-        if not existing_tx:
+        if not snapshot.transactions:
             today = datetime.now(UTC)
             samples = [
                 ("income", (today.replace(day=1)).strftime("%Y-%m-%d"), Decimal("12000000.00"), "Salary", "Bank BCA", "Monthly salary"),

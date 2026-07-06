@@ -182,7 +182,7 @@ class FinanceManagerApp(App[None]):
         elif not self._has_token():
             self.push_screen(LoginScreen(), self._on_login_result)
         else:
-            self._try_authenticate()
+            self._try_authenticate_async()
 
     def _has_client_secret(self) -> bool:
         return self.repository.config.oauth_client_secret_path.exists()
@@ -190,15 +190,18 @@ class FinanceManagerApp(App[None]):
     def _has_token(self) -> bool:
         return self.repository.config.oauth_token_path.exists()
 
+    def _try_authenticate_async(self) -> None:
+        self.query_one("#status", Static).update("Connecting...")
+        self.run_worker(self._try_authenticate, name="try-auth", group="auth")
+
     def _try_authenticate(self) -> None:
         try:
             if self.repository.config.spreadsheet_id:
-                self.query_one("#status", Static).update("Connecting...")
                 self.repository.bootstrap()
                 self.authenticated = True
-                self._load_data(initial=True)
+                self._load_data_async(initial=True)
             else:
-                self._enter_main_app()
+                self._enter_main_app_async()
         except MissingCredentialsError:
             self.push_screen(LoginScreen(), self._on_login_result)
         except (InvalidSheetStructureError, ExternalServiceError) as exc:
@@ -234,6 +237,10 @@ class FinanceManagerApp(App[None]):
             return
         self._enter_main_app()
 
+    def _enter_main_app_async(self) -> None:
+        self.query_one("#status", Static).update("Loading spreadsheets...")
+        self.run_worker(self._enter_main_app, name="enter-main", group="auth")
+
     def _enter_main_app(self) -> None:
         """Called after OAuth completes (or on mount when already authed).
 
@@ -255,7 +262,7 @@ class FinanceManagerApp(App[None]):
                 self._refresh_ui(self.error_message)
                 return
             self.authenticated = True
-            self._load_data(initial=True)
+            self._load_data_async(initial=True)
             return
         self.push_screen(SheetSelectScreen(sheets), self._on_sheet_selected)
 
@@ -270,11 +277,14 @@ class FinanceManagerApp(App[None]):
             self._refresh_ui(self.error_message)
             return
         self.authenticated = True
-        self._load_data(initial=True)
+        self._load_data_async(initial=True)
+
+    def _load_data_async(self, *, initial: bool = False) -> None:
+        self.query_one("#status", Static).update("Loading data...")
+        self.run_worker(lambda: self._load_data(initial=initial), name="load-data", group="load")
 
     def _load_data(self, *, initial: bool = False) -> None:
         try:
-            self.query_one("#status", Static).update("Connecting...")
             self.repository.bootstrap()
             self.snapshot = self.repository.load_snapshot()
             self.error_message = ""
@@ -467,7 +477,7 @@ class FinanceManagerApp(App[None]):
 
     def action_reload_data(self) -> None:
         self.repository.clear_cache()
-        self._load_data()
+        self._load_data_async()
 
     def action_login(self) -> None:
         self.push_screen(LoginScreen(), self._on_login_result)
@@ -500,11 +510,11 @@ class FinanceManagerApp(App[None]):
             self.query_one("#status", Static).update("Nothing selected.")
             return
         if self.current_view == "transactions":
-            record = self.repository.get_transaction(row.record_id)
-            self._open_transaction_form(record=record)
+            self.query_one("#status", Static).update("Loading...")
+            self.run_worker(lambda: self._open_transaction_form(record_id=row.record_id), name="edit-tx", group="edit")
         elif self.current_view == "planned":
-            planned = self.repository.get_planned_transaction(row.record_id)
-            self._open_planned_form(record=planned)
+            self.query_one("#status", Static).update("Loading...")
+            self.run_worker(lambda: self._open_planned_form(record_id=row.record_id), name="edit-planned", group="edit")
         elif self.current_view == "budgets":
             budget = next((item for item in self.snapshot.budgets if item.id == row.record_id), None)
             if budget:
@@ -521,6 +531,10 @@ class FinanceManagerApp(App[None]):
         if row is None:
             self.query_one("#status", Static).update("Nothing selected.")
             return
+        self.query_one("#status", Static).update("Deleting...")
+        self.run_worker(lambda: self._do_delete(row), name="delete", group="mutate")
+
+    def _do_delete(self, row: RowRef) -> None:
         try:
             if self.current_view == "transactions":
                 self.repository.delete_transaction(row.record_id)
@@ -543,6 +557,10 @@ class FinanceManagerApp(App[None]):
             self.query_one("#status", Static).update(str(exc))
 
     def action_seed_dummy(self) -> None:
+        self.query_one("#status", Static).update("Seeding data...")
+        self.run_worker(self._do_seed_dummy, name="seed", group="mutate")
+
+    def _do_seed_dummy(self) -> None:
         try:
             created = self.repository.seed_dummy_data()
             self.snapshot = self.repository.load_snapshot()
@@ -550,7 +568,9 @@ class FinanceManagerApp(App[None]):
         except FinanceManagerError as exc:
             self.query_one("#status", Static).update(str(exc))
 
-    def _open_transaction_form(self, record: Transaction | None = None) -> None:
+    def _open_transaction_form(self, record: Transaction | None = None, record_id: str | None = None) -> None:
+        if record_id and record is None:
+            record = self.repository.get_transaction(record_id)
         category_name = self._category_name(record.category_id) if record else ""
         account_name = self._account_name(record.account_id) if record else ""
         fields = [
@@ -567,7 +587,9 @@ class FinanceManagerApp(App[None]):
             lambda data: self._save_transaction_form(data, record.id if record else None),
         )
 
-    def _open_planned_form(self, record: PlannedTransaction | None = None) -> None:
+    def _open_planned_form(self, record: PlannedTransaction | None = None, record_id: str | None = None) -> None:
+        if record_id and record is None:
+            record = self.repository.get_planned_transaction(record_id)
         category_name = self._category_name(record.category_id) if record else ""
         account_name = self._account_name(record.account_id) if record else ""
         fields = [
@@ -615,6 +637,10 @@ class FinanceManagerApp(App[None]):
         if data is None:
             self.query_one("#status", Static).update("Cancelled.")
             return
+        self.query_one("#status", Static).update("Saving...")
+        self.run_worker(lambda: self._do_save_account(data, record_id), name="save-account", group="mutate")
+
+    def _do_save_account(self, data: dict[str, str], record_id: str | None) -> None:
         try:
             if record_id:
                 self.repository.update_account(record_id, data)
@@ -629,6 +655,10 @@ class FinanceManagerApp(App[None]):
         if data is None:
             self.query_one("#status", Static).update("Cancelled.")
             return
+        self.query_one("#status", Static).update("Saving...")
+        self.run_worker(lambda: self._do_save_transaction(data, record_id), name="save-tx", group="mutate")
+
+    def _do_save_transaction(self, data: dict[str, str], record_id: str | None) -> None:
         try:
             if record_id:
                 self.repository.update_transaction(record_id, data)
@@ -643,6 +673,10 @@ class FinanceManagerApp(App[None]):
         if data is None:
             self.query_one("#status", Static).update("Cancelled.")
             return
+        self.query_one("#status", Static).update("Saving...")
+        self.run_worker(lambda: self._do_save_planned(data, record_id), name="save-planned", group="mutate")
+
+    def _do_save_planned(self, data: dict[str, str], record_id: str | None) -> None:
         try:
             if record_id:
                 self.repository.update_planned_transaction(record_id, data)
@@ -657,6 +691,10 @@ class FinanceManagerApp(App[None]):
         if data is None:
             self.query_one("#status", Static).update("Cancelled.")
             return
+        self.query_one("#status", Static).update("Saving...")
+        self.run_worker(lambda: self._do_save_budget(data, record_id), name="save-budget", group="mutate")
+
+    def _do_save_budget(self, data: dict[str, str], record_id: str | None) -> None:
         try:
             if record_id:
                 self.repository.update_budget(record_id, data)
