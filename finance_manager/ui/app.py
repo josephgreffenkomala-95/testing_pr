@@ -81,11 +81,14 @@ class FinanceManagerApp(App[None]):
         padding: 0 1;
         color: #6c4d31;
     }
-    #login {
+    #login, #logout {
         margin-top: 1;
         background: #8f3b1b;
         color: #fff8f0;
         border: round #6c4d31;
+    }
+    #logout {
+        background: #6c4d31;
     }
     #form-modal {
         width: 72;
@@ -109,6 +112,10 @@ class FinanceManagerApp(App[None]):
         margin-top: 1;
         height: auto;
     }
+    .auth-buttons {
+        margin-top: 1;
+        height: auto;
+    }
     """
 
     BINDINGS = [
@@ -122,6 +129,7 @@ class FinanceManagerApp(App[None]):
         Binding("d", "delete_record", "Delete"),
         Binding("r", "reload_data", "Reload"),
         Binding("l", "login", "Login"),
+        Binding("o", "logout", "Logout"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -143,7 +151,9 @@ class FinanceManagerApp(App[None]):
                     yield ListView(id="record-list")
                     yield Static(id="detail")
                 yield Static(id="status")
-                yield Button("Login", id="login", variant="primary")
+                with Horizontal(classes="auth-buttons"):
+                    yield Button("Login", id="login", variant="primary")
+                    yield Button("Logout", id="logout")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -315,9 +325,16 @@ class FinanceManagerApp(App[None]):
         self._load_data(initial=True)
         self.query_one("#status", Static).update("Login attempted." if self.error_message else "Logged in.")
 
+    def action_logout(self) -> None:
+        self.error_message = "Logged out."
+        self.current_view = "setup"
+        self._refresh_ui("Logged out.")
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "login":
             self.action_login()
+        elif event.button.id == "logout":
+            self.action_logout()
 
     def action_add_record(self) -> None:
         if self.current_view == "transactions":
