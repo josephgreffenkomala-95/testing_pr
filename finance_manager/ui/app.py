@@ -6,7 +6,7 @@ from rich.panel import Panel
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import Button, Footer, Header, Label, ListItem, ListView, Static
 
 from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
 from finance_manager.models.entities import Budget, PlannedTransaction, Snapshot, Transaction
@@ -81,6 +81,12 @@ class FinanceManagerApp(App[None]):
         padding: 0 1;
         color: #6c4d31;
     }
+    #login {
+        margin-top: 1;
+        background: #8f3b1b;
+        color: #fff8f0;
+        border: round #6c4d31;
+    }
     #form-modal {
         width: 72;
         height: auto;
@@ -115,6 +121,7 @@ class FinanceManagerApp(App[None]):
         Binding("e", "edit_record", "Edit"),
         Binding("d", "delete_record", "Delete"),
         Binding("r", "reload_data", "Reload"),
+        Binding("l", "login", "Login"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -136,6 +143,7 @@ class FinanceManagerApp(App[None]):
                     yield ListView(id="record-list")
                     yield Static(id="detail")
                 yield Static(id="status")
+                yield Button("Login", id="login", variant="primary")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -302,6 +310,14 @@ class FinanceManagerApp(App[None]):
 
     def action_reload_data(self) -> None:
         self._load_data()
+
+    def action_login(self) -> None:
+        self._load_data(initial=True)
+        self.query_one("#status", Static).update("Login attempted." if self.error_message else "Logged in.")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "login":
+            self.action_login()
 
     def action_add_record(self) -> None:
         if self.current_view == "transactions":
