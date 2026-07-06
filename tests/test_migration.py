@@ -182,10 +182,10 @@ def test_migrate_magang_is_idempotent_when_called_twice_on_empty_sheet(tmp_path)
     second = migrate_magang(repo, plan, year=2025)
 
     snapshot = repo.load_snapshot()
-    # The second run appends again (no dedup by design), so totals double.
     assert first.transactions_created == 7
-    assert second.transactions_created == 7
-    assert len(snapshot.transactions) == 14
-    assert len(snapshot.planned_transactions) == 14
-    # Budgets are also appended again (no idempotency here, the user can clean up).
-    assert len(snapshot.budgets) == 30
+    assert second.transactions_created == 0
+    assert second.planned_created == 0
+    assert second.budgets_created == 0
+    assert len(snapshot.transactions) == 7
+    assert len(snapshot.planned_transactions) == 7
+    assert len(snapshot.budgets) == 15

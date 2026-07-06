@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Iterable, Protocol
 
 from finance_manager.models.entities import Account, Budget, Category, PlannedTransaction, Transaction
+from finance_manager.models.schemas import SHEET_HEADERS, entity_to_row
 from finance_manager.services.sheets import GoogleSheetsRepository
 
 
@@ -147,23 +148,25 @@ def migrate_magang(
     account_name: str = "Cash",
     tithe_account_name: str = "Cash",
 ) -> MigrationReport:
-    """Migrate a parsed `magang` plan into the repository.
-
-    - completed salary / tithe rows become Transactions
-    - pending salary / tithe rows become PlannedTransactions
-    - monthly recurring expenses and shared-pocket items become Budgets for the
-      corresponding month (default: the current month)
-    """
     year = year or _default_year()
     report = MigrationReport()
+    state = _MigrationState(repository)
 
-    snapshot = repository.load_snapshot()
-    accounts_by_name = {a.name: a for a in snapshot.accounts}
-    cash_account = accounts_by_name.get(account_name) or _ensure_account(repository, account_name)
-    tithe_account = accounts_by_name.get(tithe_account_name) or _ensure_account(repository, tithe_account_name)
+    cash_account = state.ensure_account(account_name)
+    tithe_account = state.ensure_account(tithe_account_name)
 
-    month_budget_repo = _build_monthly_budgets(repository, plan.monthly_expenses + plan.shared_pocket, year)
-    report.budgets_created = len(month_budget_repo)
+    for item in plan.monthly_expenses:
+        if item.amount <= 0:
+            continue
+        budget = state.append_budget(item.name, item.amount, year)
+        if budget is not None:
+            report.budgets_created += 1
+    for item in plan.shared_pocket:
+        if item.amount <= 0:
+            continue
+        budget = state.append_budget(f"{item.name} (Kantong Bersama)", item.amount, year)
+        if budget is not None:
+            report.budgets_created += 1
 
     for row in plan.salary_rows:
         if row.amount <= 0:
@@ -171,10 +174,9 @@ def migrate_magang(
         month_number = row.month_number
         if month_number is None:
             continue
-        category = _ensure_category(repository, "Salary", "income")
+        category = state.ensure_category("Salary", "income")
         if row.is_done:
-            transaction = _append_transaction(
-                repository,
+            transaction = state.append_transaction(
                 entry_type="income",
                 date=_date(year, month_number, 1),
                 amount=row.amount,
@@ -182,11 +184,11 @@ def migrate_magang(
                 account=cash_account,
                 description=row.description(year),
             )
-            report.transactions_created += 1
-            report.transactions.append(transaction)
+            if transaction is not None:
+                report.transactions_created += 1
+                report.transactions.append(transaction)
         else:
-            planned = _append_planned(
-                repository,
+            planned = state.append_planned(
                 entry_type="income",
                 status="planned",
                 expected_date=_date(year, month_number, 1),
@@ -195,19 +197,17 @@ def migrate_magang(
                 account=cash_account,
                 description=row.description(year),
             )
-            report.planned_created += 1
-            report.planned.append(planned)
+            if planned is not None:
+                report.planned_created += 1
+                report.planned.append(planned)
 
-    tithe_category = _ensure_category(repository, "Perpuluhan Mami", "expense")
+    tithe_category = state.ensure_category("Perpuluhan Mami", "expense")
     for index, tithe in enumerate(plan.tithe_rows, start=1):
         if tithe.amount <= 0:
             continue
         month_number = _tithe_month_number(index)
-        if month_number is None:
-            continue
         if tithe.is_done:
-            transaction = _append_transaction(
-                repository,
+            transaction = state.append_transaction(
                 entry_type="expense",
                 date=_date(year, month_number, 1),
                 amount=tithe.amount,
@@ -215,11 +215,11 @@ def migrate_magang(
                 account=tithe_account,
                 description=f"Perpuluhan Mami ke-{index}",
             )
-            report.transactions_created += 1
-            report.transactions.append(transaction)
+            if transaction is not None:
+                report.transactions_created += 1
+                report.transactions.append(transaction)
         else:
-            planned = _append_planned(
-                repository,
+            planned = state.append_planned(
                 entry_type="expense",
                 status="planned",
                 expected_date=_date(year, month_number, 1),
@@ -228,107 +228,191 @@ def migrate_magang(
                 account=tithe_account,
                 description=f"Perpuluhan Mami ke-{index}",
             )
-            report.planned_created += 1
-            report.planned.append(planned)
+            if planned is not None:
+                report.planned_created += 1
+                report.planned.append(planned)
 
     return report
 
 
 def _tithe_month_number(index: int) -> int:
-    # Perpuluhan rows start at the same month as the first salary (Februari=2).
     base = 2
     return base + (index - 1)
-
-
-def _build_monthly_budgets(
-    repository: GoogleSheetsRepository,
-    items: list[LineItem],
-    year: int,
-) -> list[Budget]:
-    from datetime import UTC, datetime
-    current_month = datetime.now(UTC).strftime("%Y-%m")
-    created: list[Budget] = []
-    for item in items:
-        if item.amount <= 0:
-            continue
-        _ensure_category(repository, item.name, "expense")
-        budget = repository.add_budget(
-            {
-                "month": current_month,
-                "category": item.name,
-                "entry_type": "expense",
-                "amount": str(item.amount),
-                "notes": f"Migrated from magang plan ({year})",
-            }
-        )
-        created.append(budget)
-    return created
-
-
-def _ensure_account(repository: GoogleSheetsRepository, name: str) -> Account:
-    snapshot = repository.load_snapshot()
-    for account in snapshot.accounts:
-        if account.name.lower() == name.lower():
-            return account
-    return repository.add_account(
-        {"name": name, "account_type": "cash", "currency": "IDR", "current_balance": "0"}
-    )
-
-
-def _ensure_category(repository: GoogleSheetsRepository, name: str, entry_type: str) -> Category:
-    return repository.ensure_category(name, entry_type)
 
 
 def _date(year: int, month: int, day: int) -> str:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
-def _append_transaction(
-    repository: GoogleSheetsRepository,
-    *,
-    entry_type: str,
-    date: str,
-    amount: Decimal,
-    category: Category,
-    account: Account,
-    description: str,
-) -> Transaction:
-    return repository.add_transaction(
-        {
-            "entry_type": entry_type,
-            "date": date,
-            "amount": str(amount),
-            "category": category.name,
-            "account": account.name,
-            "description": description,
-            "notes": "Migrated from magang sheet",
+class _MigrationState:
+    def __init__(self, repository: GoogleSheetsRepository) -> None:
+        from datetime import UTC, datetime
+
+        self.repository = repository
+        self.snapshot = repository.load_snapshot()
+        self.now = repository._now()
+        self.current_month = datetime.now(UTC).strftime("%Y-%m")
+        self.worksheets = {worksheet.title: worksheet for worksheet in repository._spreadsheet.worksheets()}
+        self.accounts_by_name = {
+            account.name.strip().lower(): account
+            for account in self.snapshot.accounts
+            if account.name.strip()
         }
-    )
+        self.categories_by_key = {
+            (category.name.strip().lower(), category.kind): category
+            for category in self.snapshot.categories
+            if category.name.strip()
+        }
+        self.transaction_keys = {
+            (item.entry_type, item.date, item.amount, item.category_id, item.account_id, item.description)
+            for item in self.snapshot.transactions
+        }
+        self.planned_keys = {
+            (item.entry_type, item.status, item.expected_date or "", item.amount, item.category_id, item.account_id, item.description)
+            for item in self.snapshot.planned_transactions
+        }
+        self.budget_keys = {
+            (item.month, item.category_id, item.entry_type)
+            for item in self.snapshot.budgets
+        }
+        self.account_index = _highest_suffix(self.snapshot.accounts, "ACC")
+        self.category_index = _highest_suffix(self.snapshot.categories, "CAT")
+        self.transaction_index = _highest_suffix(self.snapshot.transactions, "TX")
+        self.planned_index = _highest_suffix(self.snapshot.planned_transactions, "PLN")
+        self.budget_index = _highest_suffix(self.snapshot.budgets, "BDG")
+
+    def ensure_account(self, name: str) -> Account:
+        key = name.strip().lower()
+        existing = self.accounts_by_name.get(key)
+        if existing is not None:
+            return existing
+        self.account_index += 1
+        account = Account(
+            id=f"ACC{self.account_index:04d}",
+            name=name.strip(),
+            account_type="cash",
+            currency="IDR",
+            current_balance=Decimal("0.00"),
+            is_active=True,
+        )
+        self._append_entity("Accounts", account)
+        self.accounts_by_name[key] = account
+        return account
+
+    def ensure_category(self, name: str, entry_type: str) -> Category:
+        key = (name.strip().lower(), entry_type)
+        existing = self.categories_by_key.get(key)
+        if existing is not None:
+            return existing
+        self.category_index += 1
+        category = Category(
+            id=f"CAT{self.category_index:04d}",
+            name=name.strip(),
+            kind=entry_type,
+            is_active=True,
+        )
+        self._append_entity("Categories", category)
+        self.categories_by_key[key] = category
+        return category
+
+    def append_budget(self, category_name: str, amount: Decimal, year: int) -> Budget | None:
+        category = self.ensure_category(category_name, "expense")
+        key = (self.current_month, category.id, "expense")
+        if key in self.budget_keys:
+            return None
+        self.budget_index += 1
+        budget = Budget(
+            id=f"BDG{self.budget_index:04d}",
+            month=self.current_month,
+            category_id=category.id,
+            entry_type="expense",
+            amount=amount,
+            notes=f"Migrated from magang plan ({year})",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        self._append_entity("Budgets", budget)
+        self.budget_keys.add(key)
+        return budget
+
+    def append_transaction(
+        self,
+        *,
+        entry_type: str,
+        date: str,
+        amount: Decimal,
+        category: Category,
+        account: Account,
+        description: str,
+    ) -> Transaction | None:
+        key = (entry_type, date, amount, category.id, account.id, description)
+        if key in self.transaction_keys:
+            return None
+        self.transaction_index += 1
+        transaction = Transaction(
+            id=f"TX{self.transaction_index:04d}",
+            entry_type=entry_type,
+            date=date,
+            amount=amount,
+            category_id=category.id,
+            account_id=account.id,
+            description=description,
+            notes="Migrated from magang sheet",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        self._append_entity("Transactions", transaction)
+        self.transaction_keys.add(key)
+        return transaction
+
+    def append_planned(
+        self,
+        *,
+        entry_type: str,
+        status: str,
+        expected_date: str,
+        amount: Decimal,
+        category: Category,
+        account: Account,
+        description: str,
+    ) -> PlannedTransaction | None:
+        key = (entry_type, status, expected_date, amount, category.id, account.id, description)
+        if key in self.planned_keys:
+            return None
+        self.planned_index += 1
+        planned = PlannedTransaction(
+            id=f"PLN{self.planned_index:04d}",
+            entry_type=entry_type,
+            status=status,
+            expected_date=expected_date,
+            amount=amount,
+            category_id=category.id,
+            account_id=account.id,
+            description=description,
+            notes="Migrated from magang sheet",
+            created_at=self.now,
+            updated_at=self.now,
+        )
+        self._append_entity("Planned Transactions", planned)
+        self.planned_keys.add(key)
+        return planned
+
+    def _append_entity(self, title: str, entity: object) -> None:
+        worksheet = self.worksheets[title]
+        worksheet.append_row(entity_to_row(entity, SHEET_HEADERS[title]))
 
 
-def _append_planned(
-    repository: GoogleSheetsRepository,
-    *,
-    entry_type: str,
-    status: str,
-    expected_date: str,
-    amount: Decimal,
-    category: Category,
-    account: Account,
-    description: str,
-) -> PlannedTransaction:
-    return repository.add_planned_transaction(
-        {
-            "entry_type": entry_type,
-            "status": status,
-            "expected_date": expected_date,
-            "amount": str(amount),
-            "category": category.name,
-            "account": account.name,
-            "description": description,
-            "notes": "Migrated from magang sheet",
-        }
-    )
+def _highest_suffix(entities: list[object], prefix: str) -> int:
+    highest = 0
+    for entity in entities:
+        entity_id = getattr(entity, "id", "")
+        if not isinstance(entity_id, str) or not entity_id.startswith(prefix):
+            continue
+        try:
+            highest = max(highest, int(entity_id[len(prefix):]))
+        except ValueError:
+            continue
+    return highest
 
 
 class MigrationReport:
