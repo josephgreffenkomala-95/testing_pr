@@ -193,6 +193,26 @@ def test_get_entity_uses_cache(tmp_path):
     assert result.description == "Cached"
 
 
+def test_get_entity_without_prior_cache(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+
+    tx = repo.add_transaction({
+        "entry_type": "expense",
+        "date": "2026-07-01",
+        "amount": "100.00",
+        "category": "Test",
+        "description": "ColdLookup",
+        "account": "Cash",
+        "notes": "",
+    })
+    repo._cache = None
+
+    result = repo.get_transaction(tx.id)
+    assert result.id == tx.id
+    assert result.description == "ColdLookup"
+
+
 def test_cache_is_cleared_on_use_spreadsheet(tmp_path):
     repo = build_repo(tmp_path)
     repo.bootstrap()

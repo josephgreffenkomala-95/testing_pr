@@ -603,10 +603,14 @@ class GoogleSheetsRepository:
             counters[prefix] = current
 
     def _get_entity(self, title: str, record_id: str):
-        snapshot = self.load_snapshot()
-        entity_list = self._entity_list_for_title(snapshot, title)
-        if entity_list is not None:
-            for entity in entity_list:
+        if self._cache is not None:
+            entity_list = self._entity_list_for_title(self._cache, title)
+            if entity_list is not None:
+                for entity in entity_list:
+                    if entity.id == record_id:
+                        return entity
+        else:
+            for entity in self._read_entities(title):
                 if entity.id == record_id:
                     return entity
         raise KeyError(record_id)
