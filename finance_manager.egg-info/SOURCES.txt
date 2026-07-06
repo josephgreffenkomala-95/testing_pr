@@ -26,3 +26,4 @@ finance_manager/ui/screens.py
 tests/test_calculations.py
 tests/test_cli.py
 tests/test_repository.py
+tests/test_sheets_cache.py

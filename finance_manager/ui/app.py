@@ -258,6 +258,7 @@ class FinanceManagerApp(App[None]):
 
     def _load_data(self, *, initial: bool = False) -> None:
         try:
+            self.query_one("#status", Static).update("Connecting...")
             self.repository.bootstrap()
             self.snapshot = self.repository.load_snapshot()
             self.error_message = ""
@@ -397,6 +398,7 @@ class FinanceManagerApp(App[None]):
         rows = [
             ("Spreadsheet ID", self.repository.config.spreadsheet_id or "Stored after first successful bootstrap"),
             ("Spreadsheet URL", url or "(available once a sheet is opened)"),
+            ("Open in browser", "Press o to open the sheet URL"),
             ("OAuth client file", str(self.repository.config.oauth_client_secret_path)),
             ("OAuth token file", str(self.repository.config.oauth_token_path)),
             ("Current title", self.repository.config.spreadsheet_title),
