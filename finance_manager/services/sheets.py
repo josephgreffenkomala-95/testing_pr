@@ -62,6 +62,15 @@ def _require_month(value: str) -> str:
         raise ValueError("Month must use YYYY-MM.") from exc
 
 
+def _is_spreadsheet_not_found(exc: BaseException) -> bool:
+    """Return True when ``exc`` indicates the spreadsheet does not exist."""
+    try:
+        import gspread
+    except ImportError:
+        return False
+    return isinstance(exc, gspread.SpreadsheetNotFound)
+
+
 class GoogleSheetsRepository:
     def __init__(
         self,
@@ -83,6 +92,18 @@ class GoogleSheetsRepository:
             persist_app_state(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=self.config.spreadsheet_title)
         return spreadsheet_id or ""
 
+    def list_spreadsheets(self) -> list[tuple[str, str]]:
+        client = self._get_client()
+        try:
+            spreadsheets = client.openall()
+        except Exception as exc:
+            raise ExternalServiceError(str(exc)) from exc
+        return [(getattr(spreadsheet, "id", ""), getattr(spreadsheet, "title", "")) for spreadsheet in spreadsheets]
+
+    def use_spreadsheet(self, spreadsheet_id: str, title: str = "") -> str:
+        self.config = replace(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=title or spreadsheet_id)
+        return self.bootstrap()
+
     def load_snapshot(self) -> Snapshot:
         self._require_ready()
         return Snapshot(
@@ -96,8 +117,8 @@ class GoogleSheetsRepository:
 
     def add_transaction(self, data: dict[str, str]) -> Transaction:
         snapshot = self.load_snapshot()
-        category = self.ensure_category(data["category"], data["entry_type"])
-        account = self.ensure_account(data["account"])
+        category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
+        account = self.ensure_account(data["account"], accounts=snapshot.accounts)
         entry = Transaction(
             id=self._next_id("Transactions", "TX"),
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
@@ -208,19 +229,21 @@ class GoogleSheetsRepository:
     def delete_budget(self, record_id: str) -> None:
         self._delete_entity("Budgets", record_id)
 
-    def ensure_category(self, name: str, entry_type: str) -> Category:
+    def ensure_category(self, name: str, entry_type: str, *, categories: list[Category] | None = None) -> Category:
         cleaned_name = name.strip()
         cleaned_type = _require_choice(entry_type, ("income", "expense"), "Type")
-        for category in self._read_entities("Categories"):
+        existing = categories if categories is not None else self._read_entities("Categories")
+        for category in existing:
             if category.name.lower() == cleaned_name.lower() and category.kind == cleaned_type:
                 return category
         category = Category(id=self._next_id("Categories", "CAT"), name=cleaned_name, kind=cleaned_type, is_active=True)
         self._append_entity("Categories", category)
         return category
 
-    def ensure_account(self, name: str) -> Account:
+    def ensure_account(self, name: str, *, accounts: list[Account] | None = None) -> Account:
         cleaned_name = name.strip()
-        for account in self._read_entities("Accounts"):
+        existing = accounts if accounts is not None else self._read_entities("Accounts")
+        for account in existing:
             if account.name.lower() == cleaned_name.lower():
                 return account
         account = Account(
@@ -243,9 +266,18 @@ class GoogleSheetsRepository:
     def get_budget(self, record_id: str) -> Budget:
         return self._get_entity("Budgets", record_id)
 
-    def _require_ready(self) -> None:
+    def _require_ready(self) -> bool:
+        """Ensure a spreadsheet is open, bootstrapping one if needed.
+
+        Returns True when ``bootstrap()`` was just invoked so callers know the
+        spreadsheet was lazily initialised. Failures from ``bootstrap()`` are
+        not swallowed — they propagate to the original caller so the error is
+        visible instead of silently masking the read with an empty result.
+        """
         if self._spreadsheet is None:
             self.bootstrap()
+            return True
+        return False
 
     def _open_or_create_spreadsheet(self):
         client = self._get_client()
@@ -254,6 +286,11 @@ class GoogleSheetsRepository:
                 return client.open_by_key(self.config.spreadsheet_id)
             return client.open(self.config.spreadsheet_title)
         except Exception as exc:
+            # Only attempt to create a new spreadsheet when the existing one
+            # cannot be found. For auth/network/permission errors we surface
+            # the original cause instead of masking it with a create attempt.
+            if not _is_spreadsheet_not_found(exc):
+                raise
             try:
                 created = client.create(self.config.spreadsheet_title)
                 return created
@@ -370,6 +407,13 @@ class GoogleSheetsRepository:
         raise KeyError(record_id)
 
     def _next_id(self, title: str, prefix: str) -> str:
+        """Generate the next sequential ID for a sheet.
+
+        Note: this re-reads all entities and scans IDs sequentially. It is not
+        thread-safe — concurrent operations in async or threaded contexts
+        could produce duplicate IDs. Callers are responsible for serialising
+        writes when used outside a single-threaded flow.
+        """
         values = [entity.id for entity in self._read_entities(title)]
         highest = 0
         for value in values:

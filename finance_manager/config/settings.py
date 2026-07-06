@@ -24,6 +24,9 @@ def _default_config_dir() -> Path:
     override = os.environ.get("FINANCE_MANAGER_CONFIG_DIR")
     if override:
         return Path(override).expanduser()
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / "finance-manager"
     return Path.home() / ".config" / "finance-manager"
 
 
@@ -38,7 +41,7 @@ def load_app_config() -> AppConfig:
     oauth_client_secret_path = Path(
         os.environ.get(
             "FINANCE_MANAGER_OAUTH_CLIENT_SECRET",
-            str(config_dir / "google-oauth-client-secret.json"),
+            stored.get("oauth_client_secret_path", str(config_dir / "google-oauth-client-secret.json")),
         )
     ).expanduser()
     oauth_token_path = Path(
@@ -72,4 +75,6 @@ def persist_app_state(config: AppConfig, **updates: Any) -> None:
         current = json.loads(config.config_path.read_text())
     current.setdefault("spreadsheet_title", config.spreadsheet_title)
     current.update(updates)
+    if "oauth_client_secret_path" in updates:
+        current["oauth_client_secret_path"] = str(updates["oauth_client_secret_path"])
     config.config_path.write_text(json.dumps(current, indent=2))
