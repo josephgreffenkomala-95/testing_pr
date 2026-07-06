@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 
 if TYPE_CHECKING:
@@ -17,6 +17,109 @@ if TYPE_CHECKING:
 class SheetRef:
     spreadsheet_id: str
     title: str
+
+
+@dataclass
+class ClientSecretResult:
+    """Result from the setup screen: whether to proceed and the chosen path."""
+    proceed: bool
+    client_secret_path: str
+
+
+class SetupScreen(ModalScreen[ClientSecretResult | None]):
+    """Shown when the OAuth client secret file is missing.
+
+    Walks the user through downloading a Google Cloud OAuth client secret
+    and lets them paste a path to their downloaded `client_secret.json`.
+    """
+
+    DEFAULT_CSS = """
+    SetupScreen {
+        align: center middle;
+    }
+    #setup-panel {
+        width: 84;
+        height: auto;
+        max-height: 90%;
+        padding: 1 2;
+        background: #1a1b26;
+        border: round #bb9af7;
+    }
+    #setup-title {
+        text-style: bold;
+        color: #bb9af7;
+        margin-bottom: 1;
+    }
+    #setup-steps {
+        color: #9aa5ce;
+        margin-bottom: 1;
+    }
+    #setup-path-label {
+        color: #9aa5ce;
+        margin-top: 1;
+    }
+    #setup-path {
+        background: #24283b;
+        color: #c0caf5;
+        border: solid #414868;
+    }
+    #setup-path:focus {
+        border: solid #7aa2f7;
+    }
+    #setup-hint {
+        color: #565f89;
+        margin-top: 0;
+    }
+    #setup-actions {
+        margin-top: 1;
+        height: auto;
+        align-horizontal: right;
+    }
+    #setup-continue {
+        background: #7aa2f7;
+        color: #1a1b26;
+    }
+    #setup-quit {
+        background: #414868;
+        color: #c0caf5;
+    }
+    """
+
+    def __init__(self, default_path: str) -> None:
+        super().__init__()
+        self.default_path = default_path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="setup-panel"):
+            yield Label("Setup: connect Google OAuth", id="setup-title")
+            yield Static(
+                "The OAuth client secret file was not found. To set it up:\n"
+                "\n"
+                "1. Open https://console.cloud.google.com/\n"
+                "2. Create or select a project, then enable the Google Sheets API\n"
+                "3. APIs & Services > Credentials > Create Credentials > OAuth client ID\n"
+                "4. Application type: Desktop app\n"
+                "5. Download the JSON and place it somewhere on this machine\n"
+                "\n"
+                "Enter the path to that file below, then Continue to sign in.",
+                id="setup-steps",
+            )
+            yield Label("Path to client_secret.json", id="setup-path-label")
+            yield Input(value=self.default_path, id="setup-path")
+            yield Static(
+                "Tip: set FINANCE_MANAGER_OAUTH_CLIENT_SECRET to override this path.",
+                id="setup-hint",
+            )
+            with Vertical(id="setup-actions"):
+                yield Button("Continue", id="setup-continue", variant="primary")
+                yield Button("Quit", id="setup-quit")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "setup-continue":
+            path = self.query_one("#setup-path", Input).value.strip()
+            self.dismiss(ClientSecretResult(proceed=True, client_secret_path=path))
+        elif event.button.id == "setup-quit":
+            self.dismiss(None)
 
 
 class LoginScreen(ModalScreen[bool]):

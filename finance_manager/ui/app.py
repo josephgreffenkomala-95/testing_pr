@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 from rich.panel import Panel
 from textual.app import App, ComposeResult
@@ -18,7 +19,7 @@ from finance_manager.services.sheets import (
     MissingCredentialsError,
 )
 from finance_manager.ui.forms import FormField, RecordFormScreen
-from finance_manager.ui.screens import LoginScreen, SheetRef, SheetSelectScreen
+from finance_manager.ui.screens import ClientSecretResult, LoginScreen, SheetRef, SheetSelectScreen, SetupScreen
 
 
 TOKYONIGHT_CSS = """
@@ -156,13 +157,18 @@ class FinanceManagerApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        if not self._has_credentials():
+        if not self._has_client_secret():
+            self.push_screen(SetupScreen(str(self.repository.config.oauth_client_secret_path)), self._on_setup_result)
+        elif not self._has_token():
             self.push_screen(LoginScreen(), self._on_login_result)
         else:
             self._try_authenticate()
 
-    def _has_credentials(self) -> bool:
+    def _has_client_secret(self) -> bool:
         return self.repository.config.oauth_client_secret_path.exists()
+
+    def _has_token(self) -> bool:
+        return self.repository.config.oauth_token_path.exists()
 
     def _try_authenticate(self) -> None:
         try:
@@ -174,6 +180,22 @@ class FinanceManagerApp(App[None]):
         except (InvalidSheetStructureError, ExternalServiceError) as exc:
             self.error_message = str(exc)
             self._refresh_ui(self.error_message)
+
+    def _on_setup_result(self, result: ClientSecretResult | None) -> None:
+        if result is None or not result.proceed:
+            self.app.exit("Setup cancelled.")
+            return
+        secret_path = Path(result.client_secret_path).expanduser()
+        self.repository.config = replace(
+            self.repository.config,
+            oauth_client_secret_path=secret_path,
+        )
+        if not secret_path.exists():
+            self.error_message = f"Client secret file not found: {secret_path}"
+            self._refresh_ui(self.error_message)
+            self.push_screen(SetupScreen(str(secret_path)), self._on_setup_result)
+            return
+        self.push_screen(LoginScreen(), self._on_login_result)
 
     def _on_login_result(self, proceed: bool | None) -> None:
         if not proceed:
