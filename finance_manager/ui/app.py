@@ -178,6 +178,7 @@ class FinanceManagerApp(App[None]):
     def _try_authenticate(self) -> None:
         try:
             if self.repository.config.spreadsheet_id:
+                self.query_one("#status", Static).update("Connecting...")
                 self.repository.bootstrap()
                 self.authenticated = True
                 self._load_data(initial=True)
