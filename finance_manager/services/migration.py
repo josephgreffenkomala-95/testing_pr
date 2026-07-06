@@ -400,6 +400,7 @@ class _MigrationState:
     def _append_entity(self, title: str, entity: object) -> None:
         worksheet = self.worksheets[title]
         worksheet.append_row(entity_to_row(entity, SHEET_HEADERS[title]))
+        self.repository._append_entity_cache_update(title, entity)
 
 
 def _highest_suffix(entities: list[object], prefix: str) -> int:

@@ -538,11 +538,14 @@ class GoogleSheetsRepository:
     def _append_entity(self, title: str, entity: object) -> None:
         worksheet = self._worksheet(title)
         worksheet.append_row(entity_to_row(entity, SHEET_HEADERS[title]))
+        self._append_entity_cache_update(title, entity)
+
+    def _append_entity_cache_update(self, title: str, entity: object) -> None:
         if self._cache is not None and hasattr(entity, "id"):
             entity_list = self._entity_list_for_title(self._cache, title)
             if entity_list is not None:
                 entity_list.append(entity)
-            self._bump_counter(self._id_counters, getattr(entity, "id", ""), self._prefix_for_title(title))
+                self._bump_counter(self._id_counters, getattr(entity, "id", ""), self._prefix_for_title(title))
 
     def _replace_entity(self, title: str, entity: object) -> None:
         worksheet = self._worksheet(title)
@@ -600,16 +603,12 @@ class GoogleSheetsRepository:
             counters[prefix] = current
 
     def _get_entity(self, title: str, record_id: str):
-        snapshot = self._cache
-        if snapshot is not None:
-            entity_list = self._entity_list_for_title(snapshot, title)
-            if entity_list is not None:
-                for entity in entity_list:
-                    if entity.id == record_id:
-                        return entity
-        for entity in self._read_entities(title):
-            if entity.id == record_id:
-                return entity
+        snapshot = self.load_snapshot()
+        entity_list = self._entity_list_for_title(snapshot, title)
+        if entity_list is not None:
+            for entity in entity_list:
+                if entity.id == record_id:
+                    return entity
         raise KeyError(record_id)
 
     @staticmethod
