@@ -91,3 +91,67 @@ class RecordFormScreen(ModalScreen[dict[str, str] | None]):
             for field in self.fields
         }
         self.dismiss(values)
+
+
+CONFIRM_CSS = """
+ConfirmScreen {
+    align: center middle;
+}
+#confirm-panel {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    background: #1a1b26;
+    border: round #f7768e;
+}
+#confirm-title {
+    text-style: bold;
+    color: #f7768e;
+    margin-bottom: 1;
+}
+#confirm-message {
+    color: #c0caf5;
+    margin-bottom: 1;
+}
+#confirm-detail {
+    color: #9aa5ce;
+    margin-bottom: 1;
+}
+#confirm-actions {
+    height: auto;
+    align-horizontal: right;
+}
+#confirm-yes {
+    background: #f7768e;
+    color: #1a1b26;
+}
+#confirm-no {
+    background: #414868;
+    color: #c0caf5;
+}
+"""
+
+
+class ConfirmScreen(ModalScreen[bool | None]):
+    DEFAULT_CSS = CONFIRM_CSS
+
+    def __init__(self, message: str, detail: str = "") -> None:
+        super().__init__()
+        self.message = message
+        self.detail = detail
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-panel"):
+            yield Label("Confirm", id="confirm-title")
+            yield Static(self.message, id="confirm-message")
+            if self.detail:
+                yield Static(self.detail, id="confirm-detail")
+            with Horizontal(id="confirm-actions"):
+                yield Button("Delete", id="confirm-yes", variant="primary")
+                yield Button("Cancel", id="confirm-no")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm-yes":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)

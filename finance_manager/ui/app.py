@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import webbrowser
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import Path
 
 from rich.panel import Panel
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from finance_manager.config.auth import run_oauth_flow
 from finance_manager.config.settings import persist_app_state
@@ -21,8 +22,16 @@ from finance_manager.services.sheets import (
     InvalidSheetStructureError,
     MissingCredentialsError,
 )
-from finance_manager.ui.forms import FormField, RecordFormScreen
+from finance_manager.ui.forms import ConfirmScreen, FormField, RecordFormScreen
 from finance_manager.ui.screens import ClientSecretResult, LoginScreen, SheetRef, SheetSelectScreen, SetupScreen
+
+
+def _format_amount(value: Decimal | float, currency: str = "IDR") -> str:
+    if isinstance(value, Decimal):
+        formatted = f"{value:,.2f}"
+    else:
+        formatted = f"{value:,.2f}"
+    return f"{currency} {formatted}"
 
 
 TOKYONIGHT_CSS = """
@@ -53,6 +62,22 @@ Footer {
     content-align: left middle;
     color: #7aa2f7;
     text-style: bold;
+}
+#filter-bar {
+    height: 3;
+    margin: 0 0 1 0;
+}
+#filter-input {
+    width: 1fr;
+    background: #24283b;
+    color: #c0caf5;
+    border: solid #414868;
+}
+#filter-input:focus {
+    border: solid #7aa2f7;
+}
+#filter-input.--placeholder {
+    color: #565f89;
 }
 #body {
     height: 1fr;
@@ -147,6 +172,7 @@ class FinanceManagerApp(App[None]):
         Binding("a", "add_record", "Add"),
         Binding("e", "edit_record", "Edit"),
         Binding("d", "delete_record", "Delete"),
+        Binding("f", "focus_filter", "Filter"),
         Binding("r", "reload_data", "Reload"),
         Binding("s", "seed_dummy", "Seed Data"),
         Binding("l", "login", "Login"),
@@ -163,6 +189,7 @@ class FinanceManagerApp(App[None]):
         self.row_keys: list[str] = []
         self.error_message = ""
         self.authenticated = False
+        self.filter_text = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -170,6 +197,8 @@ class FinanceManagerApp(App[None]):
             yield Static(id="sidebar")
             with Vertical(id="main"):
                 yield Static(id="tabs")
+                with Horizontal(id="filter-bar"):
+                    yield Input(placeholder="Filter records...", id="filter-input")
                 with Horizontal(id="body"):
                     yield DataTable(id="record-list")
                     yield Static(id="detail")
@@ -183,6 +212,14 @@ class FinanceManagerApp(App[None]):
             self.push_screen(LoginScreen(), self._on_login_result)
         else:
             self._try_authenticate()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "filter-input":
+            self.filter_text = event.value.lower()
+            self._refresh_ui("Filtered.")
+
+    def action_focus_filter(self) -> None:
+        self.query_one("#filter-input", Input).focus()
 
     def _has_client_secret(self) -> bool:
         return self.repository.config.oauth_client_secret_path.exists()
@@ -286,7 +323,11 @@ class FinanceManagerApp(App[None]):
     def _refresh_ui(self, status_message: str = "") -> None:
         self.query_one("#tabs", Static).update(self._render_tabs())
         self.query_one("#sidebar", Static).update(self._render_sidebar())
-        self.current_rows = self._rows_for_current_view()
+        all_rows = self._rows_for_current_view()
+        if self.filter_text:
+            self.current_rows = [r for r in all_rows if self.filter_text in r.subtitle.lower() or self.filter_text in r.title.lower()]
+        else:
+            self.current_rows = all_rows
         table = self.query_one("#record-list", DataTable)
         table.clear(columns=True)
         columns = self._table_columns()
@@ -346,7 +387,7 @@ class FinanceManagerApp(App[None]):
         lines.extend([
             f"Accounts: {len(self.snapshot.accounts)}",
             f"Categories: {len(self.snapshot.categories)}",
-            f"Balance: {balance:.2f}",
+            f"Balance: {_format_amount(balance)}",
             "",
             f"Month: {month}",
             f"Budgets: {len(budget_rows)}",
@@ -357,6 +398,7 @@ class FinanceManagerApp(App[None]):
             "a add",
             "e edit",
             "d delete",
+            "f filter",
             "r reload",
             "o open sheet",
             "q quit",
@@ -373,8 +415,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=item.id,
-                    title=f"{item.date} {item.entry_type.upper()} {item.amount:.2f}",
-                    subtitle=f"{item.date} | {item.entry_type.upper()} | {item.amount:.2f} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}",
+                    title=f"{item.date} {item.entry_type.upper()} {_format_amount(item.amount)}",
+                    subtitle=f"{item.date} | {item.entry_type.upper()} | {_format_amount(item.amount)} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}",
                 )
                 for item in items
             ]
@@ -383,8 +425,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=item.id,
-                    title=f"{item.expected_date or 'No date'} {item.status.upper()} {item.amount:.2f}",
-                    subtitle=f"{item.expected_date or 'No date'} | {item.status.upper()} | {item.entry_type} | {item.amount:.2f} | {categories.get(item.category_id, item.category_id)} | {item.description}",
+                    title=f"{item.expected_date or 'No date'} {item.status.upper()} {_format_amount(item.amount)}",
+                    subtitle=f"{item.expected_date or 'No date'} | {item.status.upper()} | {item.entry_type} | {_format_amount(item.amount)} | {categories.get(item.category_id, item.category_id)} | {item.description}",
                 )
                 for item in planned_items
             ]
@@ -393,8 +435,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=self._budget_id_for(row.category_name, row.entry_type) or row.category_name,
-                    title=f"{row.category_name} budget {row.budgeted:.2f}",
-                    subtitle=f"{row.category_name} | {row.entry_type} | {row.budgeted:.2f} | {row.actual:.2f} | {row.planned:.2f} | {row.projected_remaining:.2f}",
+                    title=f"{row.category_name} budget {_format_amount(row.budgeted)}",
+                    subtitle=f"{row.category_name} | {row.entry_type} | {_format_amount(row.budgeted)} | {_format_amount(row.actual)} | {_format_amount(row.planned)} | {_format_amount(row.projected_remaining)}",
                 )
                 for row in report
             ]
@@ -403,8 +445,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=str(index),
-                    title=f"{point.label} balance {point.balance:.2f}",
-                    subtitle=f"{point.label} | {point.balance:.2f} | {point.change:+.2f}",
+                    title=f"{point.label} balance {_format_amount(point.balance)}",
+                    subtitle=f"{point.label} | {_format_amount(point.balance)} | {_format_amount(point.change)}",
                 )
                 for index, point in enumerate(daily)
             ]
@@ -412,8 +454,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=account.id,
-                    title=f"{account.name} {account.current_balance:.2f} {account.currency}",
-                    subtitle=f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {account.current_balance:.2f} | {'yes' if account.is_active else 'no'}",
+                    title=f"{account.name} {_format_amount(account.current_balance, account.currency)}",
+                    subtitle=f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {_format_amount(account.current_balance, account.currency)} | {'yes' if account.is_active else 'no'}",
                 )
                 for account in self.snapshot.accounts
             ]
@@ -456,7 +498,10 @@ class FinanceManagerApp(App[None]):
         if row is None:
             detail.update(Panel("No records yet.\nPress `a` to add one.", title="Details"))
             return
-        detail.update(Panel(f"{row.title}\n\n{row.subtitle.replace(' | ', ' · ')}", title="Details"))
+        lines = [f"[bold]{row.title}[/bold]", ""]
+        for part in row.subtitle.split(" | "):
+            lines.append(f"  {part}")
+        detail.update(Panel("\n".join(lines), title="Details", border_style="blue"))
 
     def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
         self._update_detail()
@@ -520,6 +565,18 @@ class FinanceManagerApp(App[None]):
         row = self._selected_row()
         if row is None:
             self.query_one("#status", Static).update("Nothing selected.")
+            return
+        self.push_screen(
+            ConfirmScreen(f"Delete this {self.current_view[:-1]} record?", row.title),
+            lambda confirmed: self._confirm_delete(confirmed),
+        )
+
+    def _confirm_delete(self, confirmed: bool | None) -> None:
+        if not confirmed:
+            self.query_one("#status", Static).update("Delete cancelled.")
+            return
+        row = self._selected_row()
+        if row is None:
             return
         try:
             if self.current_view == "transactions":
