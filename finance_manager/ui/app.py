@@ -22,8 +22,17 @@ from finance_manager.services.sheets import (
     InvalidSheetStructureError,
     MissingCredentialsError,
 )
-from finance_manager.ui.forms import ConfirmScreen, FormField, RecordFormScreen
-from finance_manager.ui.screens import ClientSecretResult, LoginScreen, SheetRef, SheetSelectScreen, SetupScreen
+from finance_manager.ui.forms import ConfirmScreen, FormField, LIGHT_CONFIRM_CSS, LIGHT_FORM_CSS, RecordFormScreen
+from finance_manager.ui.screens import (
+    ClientSecretResult,
+    LIGHT_LOGIN_CSS,
+    LIGHT_SETUP_CSS,
+    LIGHT_SHEET_CSS,
+    LoginScreen,
+    SheetRef,
+    SheetSelectScreen,
+    SetupScreen,
+)
 
 
 def _format_amount(value: Decimal | float, currency: str = "IDR") -> str:
@@ -151,6 +160,128 @@ ListView > ListItem.--highlight {
 }
 """
 
+LIGHT_CSS = """
+Screen {
+    background: #ffffff;
+    color: #333333;
+}
+Header {
+    background: #4a90d9;
+    color: #ffffff;
+}
+Footer {
+    background: #f0f0f0;
+    color: #666666;
+}
+#sidebar {
+    width: 30;
+    padding: 1 2;
+    background: #f0f0f0;
+    color: #666666;
+    border-right: solid #cccccc;
+}
+#main {
+    padding: 1;
+}
+#tabs {
+    height: 3;
+    content-align: left middle;
+    color: #4a90d9;
+    text-style: bold;
+}
+#filter-bar {
+    height: 3;
+    margin: 0 0 1 0;
+}
+#filter-input {
+    width: 1fr;
+    background: #ffffff;
+    color: #333333;
+    border: solid #cccccc;
+}
+#filter-input:focus {
+    border: solid #4a90d9;
+}
+#filter-input.--placeholder {
+    color: #999999;
+}
+#body {
+    height: 1fr;
+}
+#record-list {
+    width: 1fr;
+    min-width: 48;
+    border: solid #cccccc;
+    background: #ffffff;
+}
+DataTable {
+    background: #ffffff;
+    color: #333333;
+    scrollbar-background: #ffffff;
+    scrollbar-color: #cccccc;
+    & > .datatable--header {
+        background: #f0f0f0;
+        color: #4a90d9;
+        text-style: bold;
+    }
+    & > .datatable--cursor {
+        background: #4a90d9;
+        color: #ffffff;
+    }
+    & > .datatable--hover {
+        background: #e8f0fe;
+    }
+}
+#detail {
+    width: 40;
+    padding: 1;
+    border: solid #cccccc;
+    background: #fafafa;
+    color: #333333;
+}
+#status {
+    height: 3;
+    padding: 0 1;
+    color: #666666;
+}
+#form-modal {
+    width: 72;
+    height: auto;
+    padding: 1 2;
+    background: #ffffff;
+    border: round #4a90d9;
+}
+.form-title {
+    text-style: bold;
+    color: #4a90d9;
+    margin-bottom: 1;
+}
+.form-label {
+    margin-top: 1;
+    color: #666666;
+}
+.form-hint {
+    color: #999999;
+}
+.form-buttons {
+    margin-top: 1;
+    height: auto;
+}
+ListView > ListItem {
+    background: #ffffff;
+    color: #333333;
+}
+ListView > ListItem.--highlight {
+    background: #4a90d9;
+    color: #ffffff;
+}
+"""
+
+THEMES: dict[str, str] = {
+    "tokyonight": TOKYONIGHT_CSS,
+    "light": LIGHT_CSS,
+}
+
 
 @dataclass
 class RowRef:
@@ -177,6 +308,7 @@ class FinanceManagerApp(App[None]):
         Binding("s", "seed_dummy", "Seed Data"),
         Binding("l", "login", "Login"),
         Binding("o", "open_sheet", "Open Sheet"),
+        Binding("t", "toggle_theme", "Theme"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -190,6 +322,8 @@ class FinanceManagerApp(App[None]):
         self.error_message = ""
         self.authenticated = False
         self.filter_text = ""
+        self._current_theme = self.repository.config.theme
+        self.CSS = THEMES.get(self._current_theme, TOKYONIGHT_CSS)  # type: ignore[assignment,misc]
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -207,9 +341,9 @@ class FinanceManagerApp(App[None]):
 
     def on_mount(self) -> None:
         if not self._has_client_secret():
-            self.push_screen(SetupScreen(str(self.repository.config.oauth_client_secret_path)), self._on_setup_result)
+            self.push_screen(SetupScreen(str(self.repository.config.oauth_client_secret_path), theme_css=self._theme_css("setup")), self._on_setup_result)
         elif not self._has_token():
-            self.push_screen(LoginScreen(), self._on_login_result)
+            self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
         else:
             self._try_authenticate()
 
@@ -220,6 +354,24 @@ class FinanceManagerApp(App[None]):
 
     def action_focus_filter(self) -> None:
         self.query_one("#filter-input", Input).focus()
+
+    def action_toggle_theme(self) -> None:
+        self._current_theme = "light" if self._current_theme == "tokyonight" else "tokyonight"
+        self.CSS = THEMES[self._current_theme]  # type: ignore[assignment,misc]
+        self.refresh_css()
+        persist_app_state(self.repository.config, theme=self._current_theme)
+        self._refresh_ui(f"Theme: {self._current_theme}.")
+
+    def _theme_css(self, category: str) -> str:
+        if self._current_theme == "light":
+            return {
+                "form": LIGHT_FORM_CSS,
+                "confirm": LIGHT_CONFIRM_CSS,
+                "setup": LIGHT_SETUP_CSS,
+                "login": LIGHT_LOGIN_CSS,
+                "sheet": LIGHT_SHEET_CSS,
+            }.get(category, "")
+        return ""
 
     def _has_client_secret(self) -> bool:
         return self.repository.config.oauth_client_secret_path.exists()
@@ -237,7 +389,7 @@ class FinanceManagerApp(App[None]):
             else:
                 self._enter_main_app()
         except MissingCredentialsError:
-            self.push_screen(LoginScreen(), self._on_login_result)
+            self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
         except (InvalidSheetStructureError, ExternalServiceError) as exc:
             self.error_message = str(exc)
             self._refresh_ui(self.error_message)
@@ -255,9 +407,9 @@ class FinanceManagerApp(App[None]):
         if not secret_path.exists():
             self.error_message = f"Client secret file not found: {secret_path}"
             self._refresh_ui(self.error_message)
-            self.push_screen(SetupScreen(str(secret_path)), self._on_setup_result)
+            self.push_screen(SetupScreen(str(secret_path), theme_css=self._theme_css("setup")), self._on_setup_result)
             return
-        self.push_screen(LoginScreen(), self._on_login_result)
+        self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
 
     def _on_login_result(self, proceed: bool | None) -> None:
         if not proceed:
@@ -294,7 +446,7 @@ class FinanceManagerApp(App[None]):
             self.authenticated = True
             self._load_data(initial=True)
             return
-        self.push_screen(SheetSelectScreen(sheets), self._on_sheet_selected)
+        self.push_screen(SheetSelectScreen(sheets, theme_css=self._theme_css("sheet")), self._on_sheet_selected)
 
     def _on_sheet_selected(self, sheet: SheetRef | None) -> None:
         if sheet is None:
@@ -401,6 +553,7 @@ class FinanceManagerApp(App[None]):
             "f filter",
             "r reload",
             "o open sheet",
+            f"t theme ({self._current_theme})",
             "q quit",
         ])
         if self.error_message:
@@ -515,7 +668,7 @@ class FinanceManagerApp(App[None]):
         self._load_data()
 
     def action_login(self) -> None:
-        self.push_screen(LoginScreen(), self._on_login_result)
+        self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
 
     def action_open_sheet(self) -> None:
         url = self.repository.spreadsheet_url()
@@ -567,7 +720,7 @@ class FinanceManagerApp(App[None]):
             self.query_one("#status", Static).update("Nothing selected.")
             return
         self.push_screen(
-            ConfirmScreen(f"Delete this {self.current_view[:-1]} record?", row.title),
+            ConfirmScreen(f"Delete this {self.current_view[:-1]} record?", row.title, theme_css=self._theme_css("confirm")),
             lambda confirmed: self._confirm_delete(confirmed),
         )
 
@@ -620,7 +773,7 @@ class FinanceManagerApp(App[None]):
             FormField("notes", "Notes", "Optional", record.notes if record else ""),
         ]
         self.push_screen(
-            RecordFormScreen("Transaction", fields, hint="Unknown categories/accounts are created automatically."),
+            RecordFormScreen("Transaction", fields, hint="Unknown categories/accounts are created automatically.", theme_css=self._theme_css("form")),
             lambda data: self._save_transaction_form(data, record.id if record else None),
         )
 
@@ -638,7 +791,7 @@ class FinanceManagerApp(App[None]):
             FormField("notes", "Notes", "Optional", record.notes if record else ""),
         ]
         self.push_screen(
-            RecordFormScreen("Planned transaction", fields, hint="Leave expected date blank for unscheduled plans."),
+            RecordFormScreen("Planned transaction", fields, hint="Leave expected date blank for unscheduled plans.", theme_css=self._theme_css("form")),
             lambda data: self._save_planned_form(data, record.id if record else None),
         )
 
@@ -652,7 +805,7 @@ class FinanceManagerApp(App[None]):
             FormField("notes", "Notes", "Optional", record.notes if record else ""),
         ]
         self.push_screen(
-            RecordFormScreen("Monthly budget", fields),
+            RecordFormScreen("Monthly budget", fields, theme_css=self._theme_css("form")),
             lambda data: self._save_budget_form(data, record.id if record else None),
         )
 
@@ -664,7 +817,7 @@ class FinanceManagerApp(App[None]):
             FormField("current_balance", "Current balance", "1000000.00", f"{record.current_balance:.2f}" if record else "0.00"),
         ]
         self.push_screen(
-            RecordFormScreen("Bank account", fields, hint="Add multiple accounts to track them separately."),
+            RecordFormScreen("Bank account", fields, hint="Add multiple accounts to track them separately.", theme_css=self._theme_css("form")),
             lambda data: self._save_account_form(data, record.id if record else None),
         )
 

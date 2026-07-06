@@ -8,3 +8,4 @@ Requires-Dist: google-auth>=2.32.0
 Requires-Dist: google-auth-oauthlib>=1.2.1
 Requires-Dist: rich>=13.0.0
 Requires-Dist: textual>=2.0.0
+Requires-Dist: openpyxl>=3.1.0

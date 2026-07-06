@@ -8,9 +8,122 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-
 if TYPE_CHECKING:
     from finance_manager.services.sheets import GoogleSheetsRepository
+
+
+LIGHT_SETUP_CSS = """
+SetupScreen {
+    align: center middle;
+}
+#setup-panel {
+    width: 84;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: #ffffff;
+    border: round #7b68ee;
+}
+#setup-title {
+    text-style: bold;
+    color: #7b68ee;
+    margin-bottom: 1;
+}
+#setup-steps {
+    color: #666666;
+    margin-bottom: 1;
+}
+#setup-path-label {
+    color: #666666;
+    margin-top: 1;
+}
+#setup-path {
+    background: #ffffff;
+    color: #333333;
+    border: solid #cccccc;
+}
+#setup-path:focus {
+    border: solid #4a90d9;
+}
+#setup-hint {
+    color: #999999;
+    margin-top: 0;
+}
+#setup-actions {
+    margin-top: 1;
+    height: auto;
+    align-horizontal: right;
+}
+#setup-continue {
+    background: #4a90d9;
+    color: #ffffff;
+}
+#setup-quit {
+    background: #cccccc;
+    color: #333333;
+}
+"""
+
+
+LIGHT_LOGIN_CSS = """
+LoginScreen {
+    align: center middle;
+}
+#login-panel {
+    width: 60;
+    height: auto;
+    padding: 2 4;
+    background: #ffffff;
+    border: round #4a90d9;
+}
+#login-title {
+    text-style: bold;
+    color: #4a90d9;
+    margin-bottom: 1;
+}
+#login-hint {
+    color: #666666;
+    margin-bottom: 1;
+}
+#login-btn {
+    background: #4a90d9;
+    color: #ffffff;
+    border: round #6ab0e8;
+}
+"""
+
+
+LIGHT_SHEET_CSS = """
+SheetSelectScreen {
+    align: center middle;
+}
+#sheet-panel {
+    width: 80;
+    height: 28;
+    padding: 1 2;
+    background: #ffffff;
+    border: round #4a90d9;
+}
+#sheet-title {
+    text-style: bold;
+    color: #4a90d9;
+    margin-bottom: 1;
+}
+#sheet-list {
+    height: 1fr;
+    border: solid #cccccc;
+    background: #ffffff;
+}
+#sheet-actions {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+#sheet-cancel {
+    background: #cccccc;
+    color: #333333;
+}
+"""
 
 
 @dataclass
@@ -85,9 +198,11 @@ class SetupScreen(ModalScreen[ClientSecretResult | None]):
     }
     """
 
-    def __init__(self, default_path: str) -> None:
+    def __init__(self, default_path: str, theme_css: str = "") -> None:
         super().__init__()
         self.default_path = default_path
+        if theme_css:
+            self.css = theme_css
 
     def compose(self) -> ComposeResult:
         with Vertical(id="setup-panel"):
@@ -152,6 +267,11 @@ class LoginScreen(ModalScreen[bool]):
     }
     """
 
+    def __init__(self, theme_css: str = "") -> None:
+        super().__init__()
+        if theme_css:
+            self.css = theme_css
+
     def compose(self) -> ComposeResult:
         with Vertical(id="login-panel"):
             yield Label("Finance Manager", id="login-title")
@@ -202,9 +322,11 @@ class SheetSelectScreen(ModalScreen[SheetRef | None]):
     }
     """
 
-    def __init__(self, sheets: list[SheetRef]) -> None:
+    def __init__(self, sheets: list[SheetRef], theme_css: str = "") -> None:
         super().__init__()
         self.sheets = sheets
+        if theme_css:
+            self.css = theme_css
 
     def compose(self) -> ComposeResult:
         with Vertical(id="sheet-panel"):

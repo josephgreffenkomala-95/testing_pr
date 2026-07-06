@@ -60,11 +60,13 @@ class FormField:
 class RecordFormScreen(ModalScreen[dict[str, str] | None]):
     DEFAULT_CSS = TOKYONIGHT_FORM_CSS
 
-    def __init__(self, title: str, fields: list[FormField], hint: str = "") -> None:
+    def __init__(self, title: str, fields: list[FormField], hint: str = "", theme_css: str = "") -> None:
         super().__init__()
         self.title = title
         self.fields = fields
         self.hint = hint
+        if theme_css:
+            self.css = theme_css
 
     def compose(self) -> ComposeResult:
         with Vertical(id="form-modal"):
@@ -92,6 +94,84 @@ class RecordFormScreen(ModalScreen[dict[str, str] | None]):
         }
         self.dismiss(values)
 
+
+LIGHT_FORM_CSS = """
+#form-modal {
+    background: #ffffff;
+    color: #333333;
+}
+.form-title {
+    color: #4a90d9;
+}
+.form-label {
+    color: #666666;
+}
+.form-hint {
+    color: #999999;
+}
+Input {
+    background: #ffffff;
+    color: #333333;
+    border: solid #cccccc;
+}
+Input:focus {
+    border: solid #4a90d9;
+}
+Input.--placeholder {
+    color: #999999;
+}
+Button {
+    background: #cccccc;
+    color: #333333;
+    border: solid #cccccc;
+}
+Button#save {
+    background: #4a90d9;
+    color: #ffffff;
+}
+Button:hover {
+    background: #4a90d9;
+    color: #ffffff;
+}
+"""
+
+LIGHT_CONFIRM_CSS = """
+ConfirmScreen {
+    align: center middle;
+}
+#confirm-panel {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    background: #ffffff;
+    border: round #e74c3c;
+}
+#confirm-title {
+    text-style: bold;
+    color: #e74c3c;
+    margin-bottom: 1;
+}
+#confirm-message {
+    color: #333333;
+    margin-bottom: 1;
+}
+#confirm-detail {
+    color: #666666;
+    margin-bottom: 1;
+}
+#confirm-actions {
+    height: auto;
+    align-horizontal: right;
+}
+#confirm-yes {
+    background: #e74c3c;
+    color: #ffffff;
+}
+#confirm-no {
+    background: #cccccc;
+    color: #333333;
+}
+"""
 
 CONFIRM_CSS = """
 ConfirmScreen {
@@ -135,10 +215,12 @@ ConfirmScreen {
 class ConfirmScreen(ModalScreen[bool | None]):
     DEFAULT_CSS = CONFIRM_CSS
 
-    def __init__(self, message: str, detail: str = "") -> None:
+    def __init__(self, message: str, detail: str = "", theme_css: str = "") -> None:
         super().__init__()
         self.message = message
         self.detail = detail
+        if theme_css:
+            self.css = theme_css
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-panel"):
