@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("auth", help="Run Google OAuth login and store a refreshable token.")
     sub.add_parser("init", help="Create or validate the Google Sheets database.")
     sub.add_parser("doctor", help="Run a configuration and connectivity check.")
+    sub.add_parser("seed", help="Populate the sheet with sample data for demo/testing.")
     return parser
 
 
@@ -55,6 +56,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Budgets: {len(snapshot.budgets)}")
         print(f"Categories: {len(snapshot.categories)}")
         print(f"Accounts: {len(snapshot.accounts)}")
+        return
+
+    if args.command == "seed":
+        repository.bootstrap()
+        created = repository.seed_dummy_data()
+        print(f"Seeded {created} sample rows into the spreadsheet.")
         return
 
     try:
