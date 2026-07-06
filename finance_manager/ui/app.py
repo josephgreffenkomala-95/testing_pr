@@ -65,13 +65,20 @@ Footer {
 DataTable {
     background: #24283b;
     color: #c0caf5;
-    cursor: #2ac3de;
-    cursor-gutter: #414868;
-    header-background: #1a1b26;
-    header-color: #7aa2f7;
-    header-text-style: bold;
     scrollbar-background: #1a1b26;
     scrollbar-color: #414868;
+    & > .datatable--header {
+        background: #1a1b26;
+        color: #7aa2f7;
+        text-style: bold;
+    }
+    & > .datatable--cursor {
+        background: #2ac3de;
+        color: #1a1b26;
+    }
+    & > .datatable--hover {
+        background: #414868;
+    }
 }
 #detail {
     width: 40;
