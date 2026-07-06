@@ -371,8 +371,29 @@ class FinanceManagerApp(App[None]):
         self._current_theme = "light" if self._current_theme == "tokyonight" else "tokyonight"
         self.CSS = THEMES[self._current_theme]  # type: ignore[assignment,misc]
         self.refresh_css()
+        for screen in self.screen_stack:
+            self._apply_theme_to_screen(screen)
         persist_app_state(self.repository.config, theme=self._current_theme)
         self._refresh_ui(f"Theme: {self._current_theme}.")
+
+    def _apply_theme_to_screen(self, screen) -> None:
+        from finance_manager.ui.forms import ConfirmScreen, LIGHT_CONFIRM_CSS, LIGHT_FORM_CSS, RecordFormScreen
+        from finance_manager.ui.screens import LIGHT_LOGIN_CSS, LIGHT_SETUP_CSS, LIGHT_SHEET_CSS, LoginScreen, SetupScreen, SheetSelectScreen
+        if self._current_theme == "light":
+            if isinstance(screen, RecordFormScreen):
+                screen.css = LIGHT_FORM_CSS  # type: ignore[assignment]
+            elif isinstance(screen, ConfirmScreen):
+                screen.css = LIGHT_CONFIRM_CSS  # type: ignore[assignment]
+            elif isinstance(screen, SetupScreen):
+                screen.css = LIGHT_SETUP_CSS  # type: ignore[assignment]
+            elif isinstance(screen, LoginScreen):
+                screen.css = LIGHT_LOGIN_CSS  # type: ignore[assignment]
+            elif isinstance(screen, SheetSelectScreen):
+                screen.css = LIGHT_SHEET_CSS  # type: ignore[assignment]
+            screen.refresh_css()  # type: ignore[union-attr]
+        elif isinstance(screen, (RecordFormScreen, ConfirmScreen, SetupScreen, LoginScreen, SheetSelectScreen)):
+            screen.css = None  # type: ignore[assignment]
+            screen.refresh_css()  # type: ignore[union-attr]
 
     def _theme_css(self, category: str) -> str:
         if self._current_theme == "light":
