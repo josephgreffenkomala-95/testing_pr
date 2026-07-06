@@ -116,6 +116,9 @@ class GoogleSheetsRepository:
         self._cache = None
         return self.bootstrap()
 
+    def clear_cache(self) -> None:
+        self._cache = None
+
     def load_snapshot(self) -> Snapshot:
         self._require_ready()
         if self._cache is not None:
@@ -452,13 +455,6 @@ class GoogleSheetsRepository:
 
     def _next_id(self, title: str, prefix: str) -> str:
         highest = self._id_counters.get(prefix, 0)
-        existing = [entity.id for entity in self._read_entities(title)]
-        for value in existing:
-            if value.startswith(prefix):
-                try:
-                    highest = max(highest, int(value[len(prefix):]))
-                except ValueError:
-                    continue
         next_value = highest + 1
         self._id_counters[prefix] = next_value
         return f"{prefix}{next_value:04d}"

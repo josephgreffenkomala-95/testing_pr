@@ -1,0 +1,2 @@
+[console_scripts]
+finance-manager = finance_manager.cli:main

@@ -425,6 +425,7 @@ class FinanceManagerApp(App[None]):
         self._refresh_ui(f"Viewing {view}.")
 
     def action_reload_data(self) -> None:
+        self.repository.clear_cache()
         self._load_data()
 
     def action_login(self) -> None:
@@ -435,11 +436,10 @@ class FinanceManagerApp(App[None]):
         if not url:
             self.query_one("#status", Static).update("No spreadsheet is open yet.")
             return
-        try:
-            webbrowser.open(url, new=2)
+        if webbrowser.open(url, new=2):
             self.query_one("#status", Static).update("Opened spreadsheet in browser.")
-        except webbrowser.Error as exc:
-            self.query_one("#status", Static).update(f"Could not open browser: {exc}")
+        else:
+            self.query_one("#status", Static).update("Could not open browser.")
 
     def action_add_record(self) -> None:
         if self.current_view == "transactions":
