@@ -18,6 +18,7 @@ finance_manager/models/__init__.py
 finance_manager/models/entities.py
 finance_manager/models/schemas.py
 finance_manager/services/__init__.py
+finance_manager/services/migration.py
 finance_manager/services/sheets.py
 finance_manager/ui/__init__.py
 finance_manager/ui/app.py
@@ -25,5 +26,6 @@ finance_manager/ui/forms.py
 finance_manager/ui/screens.py
 tests/test_calculations.py
 tests/test_cli.py
+tests/test_migration.py
 tests/test_repository.py
 tests/test_sheets_cache.py

@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import webbrowser
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 from rich.panel import Panel
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from finance_manager.config.auth import run_oauth_flow
 from finance_manager.config.settings import persist_app_state
-from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
+from finance_manager.logic.calculations import BudgetUsage, ProjectionPoint, current_month, month_budget_report, projection, total_balance
 from finance_manager.models.entities import Account, Budget, PlannedTransaction, Snapshot, Transaction
 from finance_manager.services.sheets import (
     ExternalServiceError,
@@ -21,8 +23,36 @@ from finance_manager.services.sheets import (
     InvalidSheetStructureError,
     MissingCredentialsError,
 )
-from finance_manager.ui.forms import FormField, RecordFormScreen
-from finance_manager.ui.screens import ClientSecretResult, LoginScreen, SheetRef, SheetSelectScreen, SetupScreen
+from finance_manager.ui.forms import (
+    ConfirmScreen,
+    FormField,
+    LIGHT_CONFIRM_CSS,
+    LIGHT_FORM_CSS,
+    RecordFormScreen,
+    TOKYONIGHT_CONFIRM_CSS,
+    TOKYONIGHT_FORM_CSS,
+)
+from finance_manager.ui.screens import (
+    ClientSecretResult,
+    LIGHT_LOGIN_CSS,
+    LIGHT_SETUP_CSS,
+    LIGHT_SHEET_CSS,
+    LoginScreen,
+    SheetRef,
+    SheetSelectScreen,
+    SetupScreen,
+    TOKYONIGHT_LOGIN_CSS,
+    TOKYONIGHT_SETUP_CSS,
+    TOKYONIGHT_SHEET_CSS,
+)
+
+
+def _format_amount(value: Decimal | float, currency: str = "IDR") -> str:
+    if isinstance(value, Decimal):
+        formatted = f"{value:,.2f}"
+    else:
+        formatted = f"{value:,.2f}"
+    return f"{currency} {formatted}"
 
 
 TOKYONIGHT_CSS = """
@@ -42,7 +72,7 @@ Footer {
     width: 30;
     padding: 1 2;
     background: #24283b;
-    color: #9aa5ce;
+    color: #a9b1d6;
     border-right: solid #414868;
 }
 #main {
@@ -53,6 +83,22 @@ Footer {
     content-align: left middle;
     color: #7aa2f7;
     text-style: bold;
+}
+#filter-bar {
+    height: 3;
+    margin: 0 0 1 0;
+}
+#filter-input {
+    width: 1fr;
+    background: #24283b;
+    color: #c0caf5;
+    border: solid #414868;
+}
+#filter-input:focus {
+    border: solid #7aa2f7;
+}
+#filter-input.--placeholder {
+    color: #565f89;
 }
 #body {
     height: 1fr;
@@ -80,6 +126,12 @@ DataTable {
     & > .datatable--hover {
         background: #414868;
     }
+    & > .datatable--even {
+        background: #24283b;
+    }
+    & > .datatable--odd {
+        background: #1e2030;
+    }
 }
 #detail {
     width: 40;
@@ -91,7 +143,7 @@ DataTable {
 #status {
     height: 3;
     padding: 0 1;
-    color: #9aa5ce;
+    color: #a9b1d6;
 }
 #form-modal {
     width: 72;
@@ -126,6 +178,166 @@ ListView > ListItem.--highlight {
 }
 """
 
+LIGHT_CSS = """
+Screen {
+    background: #ffffff;
+    color: #333333;
+}
+Header {
+    background: #4a90d9;
+    color: #ffffff;
+}
+Footer {
+    background: #f0f0f0;
+    color: #333333;
+}
+#sidebar {
+    width: 30;
+    padding: 1 2;
+    background: #f0f0f0;
+    color: #333333;
+    border-right: solid #cccccc;
+}
+#main {
+    padding: 1;
+}
+#tabs {
+    height: 3;
+    content-align: left middle;
+    color: #4a90d9;
+    text-style: bold;
+}
+#filter-bar {
+    height: 3;
+    margin: 0 0 1 0;
+}
+#filter-input {
+    width: 1fr;
+    background: #ffffff;
+    color: #333333;
+    border: solid #cccccc;
+}
+#filter-input:focus {
+    border: solid #4a90d9;
+}
+#filter-input.--placeholder {
+    color: #999999;
+}
+#body {
+    height: 1fr;
+}
+#record-list {
+    width: 1fr;
+    min-width: 48;
+    border: solid #cccccc;
+    background: #ffffff;
+}
+DataTable {
+    background: #ffffff;
+    color: #333333;
+    scrollbar-background: #ffffff;
+    scrollbar-color: #cccccc;
+    & > .datatable--header {
+        background: #f0f0f0;
+        color: #4a90d9;
+        text-style: bold;
+    }
+    & > .datatable--cursor {
+        background: #4a90d9;
+        color: #ffffff;
+    }
+    & > .datatable--hover {
+        background: #e8f0fe;
+    }
+    & > .datatable--even {
+        background: #ffffff;
+    }
+    & > .datatable--odd {
+        background: #f5f5f5;
+    }
+}
+#detail {
+    width: 40;
+    padding: 1;
+    border: solid #cccccc;
+    background: #fafafa;
+    color: #333333;
+}
+#status {
+    height: 3;
+    padding: 0 1;
+    color: #333333;
+}
+#form-modal {
+    width: 72;
+    height: auto;
+    padding: 1 2;
+    background: #ffffff;
+    border: round #4a90d9;
+}
+.form-title {
+    text-style: bold;
+    color: #4a90d9;
+    margin-bottom: 1;
+}
+.form-label {
+    margin-top: 1;
+    color: #666666;
+}
+.form-hint {
+    color: #999999;
+}
+.form-buttons {
+    margin-top: 1;
+    height: auto;
+}
+ListView > ListItem {
+    background: #ffffff;
+    color: #333333;
+}
+ListView > ListItem.--highlight {
+    background: #4a90d9;
+    color: #ffffff;
+}
+"""
+
+THEMES: dict[str, str] = {
+    "tokyonight": TOKYONIGHT_CSS,
+    "light": LIGHT_CSS,
+}
+
+THEME_PALETTES: dict[str, dict[str, object]] = {
+    "tokyonight": {
+        "accent": "#7aa2f7",
+        "positive": "#9ece6a",
+        "negative": "#f7768e",
+        "status": {"planned": "#e0af68", "confirmed": "#7aa2f7", "completed": "#9ece6a", "cancelled": "#f7768e"},
+    },
+    "light": {
+        "accent": "#4a90d9",
+        "positive": "#2e7d32",
+        "negative": "#c62828",
+        "status": {"planned": "#b26a00", "confirmed": "#2f73b8", "completed": "#2e7d32", "cancelled": "#c62828"},
+    },
+}
+
+SCREEN_THEME_CSS: dict[str, dict[str, str]] = {
+    "tokyonight": {
+        "form": TOKYONIGHT_FORM_CSS,
+        "confirm": TOKYONIGHT_CONFIRM_CSS,
+        "setup": TOKYONIGHT_SETUP_CSS,
+        "login": TOKYONIGHT_LOGIN_CSS,
+        "sheet": TOKYONIGHT_SHEET_CSS,
+    },
+    "light": {
+        "form": LIGHT_FORM_CSS,
+        "confirm": LIGHT_CONFIRM_CSS,
+        "setup": LIGHT_SETUP_CSS,
+        "login": LIGHT_LOGIN_CSS,
+        "sheet": LIGHT_SHEET_CSS,
+    },
+}
+
 
 @dataclass
 class RowRef:
@@ -147,10 +359,12 @@ class FinanceManagerApp(App[None]):
         Binding("a", "add_record", "Add"),
         Binding("e", "edit_record", "Edit"),
         Binding("d", "delete_record", "Delete"),
+        Binding("f", "focus_filter", "Filter"),
         Binding("r", "reload_data", "Reload"),
         Binding("s", "seed_dummy", "Seed Data"),
         Binding("l", "login", "Login"),
         Binding("o", "open_sheet", "Open Sheet"),
+        Binding("t", "toggle_theme", "Theme"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -163,6 +377,9 @@ class FinanceManagerApp(App[None]):
         self.row_keys: list[str] = []
         self.error_message = ""
         self.authenticated = False
+        self.filter_text = ""
+        self._current_theme = self.repository.config.theme
+        self.CSS = THEMES.get(self._current_theme, TOKYONIGHT_CSS)  # type: ignore[assignment,misc]
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -170,6 +387,8 @@ class FinanceManagerApp(App[None]):
             yield Static(id="sidebar")
             with Vertical(id="main"):
                 yield Static(id="tabs")
+                with Horizontal(id="filter-bar"):
+                    yield Input(placeholder="Filter records...", id="filter-input")
                 with Horizontal(id="body"):
                     yield DataTable(id="record-list")
                     yield Static(id="detail")
@@ -178,11 +397,58 @@ class FinanceManagerApp(App[None]):
 
     def on_mount(self) -> None:
         if not self._has_client_secret():
-            self.push_screen(SetupScreen(str(self.repository.config.oauth_client_secret_path)), self._on_setup_result)
+            self.push_screen(SetupScreen(str(self.repository.config.oauth_client_secret_path), theme_css=self._theme_css("setup")), self._on_setup_result)
         elif not self._has_token():
-            self.push_screen(LoginScreen(), self._on_login_result)
+            self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
         else:
             self._try_authenticate()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "filter-input":
+            self.filter_text = event.value.lower()
+            self._refresh_ui("Filtered.")
+
+    def action_focus_filter(self) -> None:
+        self.query_one("#filter-input", Input).focus()
+
+    def action_toggle_theme(self) -> None:
+        self._current_theme = "light" if self._current_theme == "tokyonight" else "tokyonight"
+        self.CSS = THEMES[self._current_theme]  # type: ignore[assignment,misc]
+        for screen in self.screen_stack:
+            self._apply_theme_to_screen(screen)
+        self.refresh_css()
+        persist_app_state(self.repository.config, theme=self._current_theme)
+        self._refresh_ui(f"Theme: {self._current_theme}.")
+
+    def _apply_theme_to_screen(self, screen) -> None:
+        if isinstance(screen, RecordFormScreen):
+            category = "form"
+        elif isinstance(screen, ConfirmScreen):
+            category = "confirm"
+        elif isinstance(screen, SetupScreen):
+            category = "setup"
+        elif isinstance(screen, LoginScreen):
+            category = "login"
+        elif isinstance(screen, SheetSelectScreen):
+            category = "sheet"
+        else:
+            return
+        screen.css = self._theme_css(category)  # type: ignore[assignment]
+
+    def _theme_css(self, category: str) -> str:
+        return SCREEN_THEME_CSS[self._current_theme].get(category, "")
+
+    def _theme_palette(self) -> dict[str, object]:
+        return THEME_PALETTES[self._current_theme]
+
+    def _accent_color(self) -> str:
+        return str(self._theme_palette()["accent"])
+
+    def _status_colors(self) -> dict[str, str]:
+        return cast(dict[str, str], self._theme_palette()["status"])
+
+    def _colorize(self, text: str, role: str) -> str:
+        return f"[{self._theme_palette()[role]}]{text}[/]"
 
     def _has_client_secret(self) -> bool:
         return self.repository.config.oauth_client_secret_path.exists()
@@ -200,7 +466,7 @@ class FinanceManagerApp(App[None]):
             else:
                 self._enter_main_app()
         except MissingCredentialsError:
-            self.push_screen(LoginScreen(), self._on_login_result)
+            self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
         except (InvalidSheetStructureError, ExternalServiceError) as exc:
             self.error_message = str(exc)
             self._refresh_ui(self.error_message)
@@ -218,9 +484,9 @@ class FinanceManagerApp(App[None]):
         if not secret_path.exists():
             self.error_message = f"Client secret file not found: {secret_path}"
             self._refresh_ui(self.error_message)
-            self.push_screen(SetupScreen(str(secret_path)), self._on_setup_result)
+            self.push_screen(SetupScreen(str(secret_path), theme_css=self._theme_css("setup")), self._on_setup_result)
             return
-        self.push_screen(LoginScreen(), self._on_login_result)
+        self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
 
     def _on_login_result(self, proceed: bool | None) -> None:
         if not proceed:
@@ -257,7 +523,7 @@ class FinanceManagerApp(App[None]):
             self.authenticated = True
             self._load_data(initial=True)
             return
-        self.push_screen(SheetSelectScreen(sheets), self._on_sheet_selected)
+        self.push_screen(SheetSelectScreen(sheets, theme_css=self._theme_css("sheet")), self._on_sheet_selected)
 
     def _on_sheet_selected(self, sheet: SheetRef | None) -> None:
         if sheet is None:
@@ -286,7 +552,11 @@ class FinanceManagerApp(App[None]):
     def _refresh_ui(self, status_message: str = "") -> None:
         self.query_one("#tabs", Static).update(self._render_tabs())
         self.query_one("#sidebar", Static).update(self._render_sidebar())
-        self.current_rows = self._rows_for_current_view()
+        all_rows = self._rows_for_current_view()
+        if self.filter_text:
+            self.current_rows = [r for r in all_rows if self.filter_text in r.subtitle.lower() or self.filter_text in r.title.lower()]
+        else:
+            self.current_rows = all_rows
         table = self.query_one("#record-list", DataTable)
         table.clear(columns=True)
         columns = self._table_columns()
@@ -346,7 +616,7 @@ class FinanceManagerApp(App[None]):
         lines.extend([
             f"Accounts: {len(self.snapshot.accounts)}",
             f"Categories: {len(self.snapshot.categories)}",
-            f"Balance: {balance:.2f}",
+            f"Balance: {_format_amount(balance)}",
             "",
             f"Month: {month}",
             f"Budgets: {len(budget_rows)}",
@@ -357,24 +627,69 @@ class FinanceManagerApp(App[None]):
             "a add",
             "e edit",
             "d delete",
+            "f filter",
             "r reload",
             "o open sheet",
+            f"t theme ({self._current_theme})",
             "q quit",
         ])
         if self.error_message:
             lines.extend(["", "Status", self.error_message[:120]])
         return "\n".join(lines)
 
+    def _fmt_amount_colored(self, amount: Decimal | float, currency: str = "IDR") -> str:
+        formatted = _format_amount(amount, currency)
+        if amount > 0:
+            return self._colorize(formatted, "positive")
+        if amount < 0:
+            return self._colorize(formatted, "negative")
+        return formatted
+
+    def _fmt_type_colored(self, entry_type: str) -> str:
+        return self._colorize(entry_type.upper(), "positive" if entry_type == "income" else "negative")
+
+    def _fmt_transaction(self, item: Transaction, categories: dict[str, str], accounts: dict[str, str]) -> str:
+        amount = _format_amount(item.amount)
+        colored_amount = self._colorize(amount, "positive" if item.entry_type == "income" else "negative")
+        return f"{item.date} | {self._fmt_type_colored(item.entry_type)} | {colored_amount} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}"
+
+    def _fmt_planned(self, item: PlannedTransaction, categories: dict[str, str], accounts: dict[str, str], status_colors: dict[str, str]) -> str:
+        amount = _format_amount(item.amount)
+        colored_amount = self._colorize(amount, "positive" if item.entry_type == "income" else "negative")
+        sc = status_colors.get(item.status)
+        colored_status = f"[{sc}]{item.status.upper()}[/]" if sc else item.status.upper()
+        return f"{item.expected_date or 'No date'} | {colored_status} | {self._fmt_type_colored(item.entry_type)} | {colored_amount} | {categories.get(item.category_id, item.category_id)} | {item.description}"
+
+    def _fmt_budget_row(self, row: BudgetUsage) -> str:
+        budgeted = self._fmt_amount_colored(row.budgeted)
+        actual = self._fmt_amount_colored(row.actual)
+        planned = self._fmt_amount_colored(row.planned)
+        remaining = self._fmt_amount_colored(row.projected_remaining)
+        return f"{row.category_name} | {row.entry_type} | {budgeted} | {actual} | {planned} | {remaining}"
+
+    def _fmt_projection(self, point: ProjectionPoint) -> str:
+        balance = self._fmt_amount_colored(point.balance)
+        if point.change >= 0:
+            change = self._colorize(_format_amount(point.change), "positive")
+        else:
+            change = self._colorize(_format_amount(point.change), "negative")
+        return f"{point.label} | {balance} | {change}"
+
+    def _fmt_account(self, account: Account) -> str:
+        balance = self._fmt_amount_colored(account.current_balance, account.currency)
+        return f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {balance} | {'yes' if account.is_active else 'no'}"
+
     def _rows_for_current_view(self) -> list[RowRef]:
         categories = {category.id: category.name for category in self.snapshot.categories}
         accounts = {account.id: account.name for account in self.snapshot.accounts}
+        status_colors = self._status_colors()
         if self.current_view == "transactions":
             items = sorted(self.snapshot.transactions, key=lambda item: item.date, reverse=True)
             return [
                 RowRef(
                     record_id=item.id,
-                    title=f"{item.date} {item.entry_type.upper()} {item.amount:.2f}",
-                    subtitle=f"{item.date} | {item.entry_type.upper()} | {item.amount:.2f} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}",
+                    title=f"{item.date} {item.entry_type.upper()} {_format_amount(item.amount)}",
+                    subtitle=self._fmt_transaction(item, categories, accounts),
                 )
                 for item in items
             ]
@@ -383,8 +698,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=item.id,
-                    title=f"{item.expected_date or 'No date'} {item.status.upper()} {item.amount:.2f}",
-                    subtitle=f"{item.expected_date or 'No date'} | {item.status.upper()} | {item.entry_type} | {item.amount:.2f} | {categories.get(item.category_id, item.category_id)} | {item.description}",
+                    title=f"{item.expected_date or 'No date'} {item.status.upper()} {_format_amount(item.amount)}",
+                    subtitle=self._fmt_planned(item, categories, accounts, status_colors),
                 )
                 for item in planned_items
             ]
@@ -393,8 +708,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=self._budget_id_for(row.category_name, row.entry_type) or row.category_name,
-                    title=f"{row.category_name} budget {row.budgeted:.2f}",
-                    subtitle=f"{row.category_name} | {row.entry_type} | {row.budgeted:.2f} | {row.actual:.2f} | {row.planned:.2f} | {row.projected_remaining:.2f}",
+                    title=f"{row.category_name} budget {_format_amount(row.budgeted)}",
+                    subtitle=self._fmt_budget_row(row),
                 )
                 for row in report
             ]
@@ -403,8 +718,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=str(index),
-                    title=f"{point.label} balance {point.balance:.2f}",
-                    subtitle=f"{point.label} | {point.balance:.2f} | {point.change:+.2f}",
+                    title=f"{point.label} balance {_format_amount(point.balance)}",
+                    subtitle=self._fmt_projection(point),
                 )
                 for index, point in enumerate(daily)
             ]
@@ -412,8 +727,8 @@ class FinanceManagerApp(App[None]):
             return [
                 RowRef(
                     record_id=account.id,
-                    title=f"{account.name} {account.current_balance:.2f} {account.currency}",
-                    subtitle=f"{account.id} | {account.name} | {account.account_type} | {account.currency} | {account.current_balance:.2f} | {'yes' if account.is_active else 'no'}",
+                    title=f"{account.name} {_format_amount(account.current_balance, account.currency)}",
+                    subtitle=self._fmt_account(account),
                 )
                 for account in self.snapshot.accounts
             ]
@@ -450,13 +765,31 @@ class FinanceManagerApp(App[None]):
             return self.current_rows[0] if self.current_rows else None
         return self.current_rows[table.cursor_row]
 
+    def _detail_labels(self) -> list[str]:
+        if self.current_view == "transactions":
+            return ["Date", "Type", "Amount", "Category", "Account", "Description"]
+        if self.current_view == "planned":
+            return ["Expected date", "Status", "Type", "Amount", "Category", "Description"]
+        if self.current_view == "budgets":
+            return ["Category", "Type", "Budgeted", "Actual", "Planned", "Remaining"]
+        if self.current_view == "projection":
+            return ["Label", "Balance", "Change"]
+        if self.current_view == "accounts":
+            return ["ID", "Name", "Type", "Currency", "Balance", "Active"]
+        return ["Title", "Subtitle"]
+
     def _update_detail(self) -> None:
         row = self._selected_row()
         detail = self.query_one("#detail", Static)
         if row is None:
             detail.update(Panel("No records yet.\nPress `a` to add one.", title="Details"))
             return
-        detail.update(Panel(f"{row.title}\n\n{row.subtitle.replace(' | ', ' · ')}", title="Details"))
+        labels = self._detail_labels()
+        parts = row.subtitle.split(" | ")
+        lines = [f"[bold]{row.title}[/bold]", ""]
+        for label, part in zip(labels, parts):
+            lines.append(f"  [bold]{label}:[/] {part}")
+        detail.update(Panel("\n".join(lines), title="Details", border_style=self._accent_color()))
 
     def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
         self._update_detail()
@@ -470,7 +803,7 @@ class FinanceManagerApp(App[None]):
         self._load_data()
 
     def action_login(self) -> None:
-        self.push_screen(LoginScreen(), self._on_login_result)
+        self.push_screen(LoginScreen(theme_css=self._theme_css("login")), self._on_login_result)
 
     def action_open_sheet(self) -> None:
         url = self.repository.spreadsheet_url()
@@ -521,6 +854,18 @@ class FinanceManagerApp(App[None]):
         if row is None:
             self.query_one("#status", Static).update("Nothing selected.")
             return
+        self.push_screen(
+            ConfirmScreen(f"Delete this {self.current_view[:-1]} record?", row.title, theme_css=self._theme_css("confirm")),
+            lambda confirmed: self._confirm_delete(confirmed),
+        )
+
+    def _confirm_delete(self, confirmed: bool | None) -> None:
+        if not confirmed:
+            self.query_one("#status", Static).update("Delete cancelled.")
+            return
+        row = self._selected_row()
+        if row is None:
+            return
         try:
             if self.current_view == "transactions":
                 self.repository.delete_transaction(row.record_id)
@@ -563,7 +908,7 @@ class FinanceManagerApp(App[None]):
             FormField("notes", "Notes", "Optional", record.notes if record else ""),
         ]
         self.push_screen(
-            RecordFormScreen("Transaction", fields, hint="Unknown categories/accounts are created automatically."),
+            RecordFormScreen("Transaction", fields, hint="Unknown categories/accounts are created automatically.", theme_css=self._theme_css("form")),
             lambda data: self._save_transaction_form(data, record.id if record else None),
         )
 
@@ -581,7 +926,7 @@ class FinanceManagerApp(App[None]):
             FormField("notes", "Notes", "Optional", record.notes if record else ""),
         ]
         self.push_screen(
-            RecordFormScreen("Planned transaction", fields, hint="Leave expected date blank for unscheduled plans."),
+            RecordFormScreen("Planned transaction", fields, hint="Leave expected date blank for unscheduled plans.", theme_css=self._theme_css("form")),
             lambda data: self._save_planned_form(data, record.id if record else None),
         )
 
@@ -595,7 +940,7 @@ class FinanceManagerApp(App[None]):
             FormField("notes", "Notes", "Optional", record.notes if record else ""),
         ]
         self.push_screen(
-            RecordFormScreen("Monthly budget", fields),
+            RecordFormScreen("Monthly budget", fields, theme_css=self._theme_css("form")),
             lambda data: self._save_budget_form(data, record.id if record else None),
         )
 
@@ -607,7 +952,7 @@ class FinanceManagerApp(App[None]):
             FormField("current_balance", "Current balance", "1000000.00", f"{record.current_balance:.2f}" if record else "0.00"),
         ]
         self.push_screen(
-            RecordFormScreen("Bank account", fields, hint="Add multiple accounts to track them separately."),
+            RecordFormScreen("Bank account", fields, hint="Add multiple accounts to track them separately.", theme_css=self._theme_css("form")),
             lambda data: self._save_account_form(data, record.id if record else None),
         )
 

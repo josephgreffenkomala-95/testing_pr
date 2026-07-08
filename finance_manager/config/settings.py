@@ -18,6 +18,7 @@ class AppConfig:
     oauth_token_path: Path
     spreadsheet_title: str
     spreadsheet_id: str | None
+    theme: str = "tokyonight"
 
 
 def _default_config_dir() -> Path:
@@ -58,6 +59,7 @@ def load_app_config() -> AppConfig:
         "FINANCE_MANAGER_SPREADSHEET_ID",
         stored.get("spreadsheet_id"),
     )
+    theme = stored.get("theme", "tokyonight")
 
     return AppConfig(
         config_dir=config_dir,
@@ -66,6 +68,7 @@ def load_app_config() -> AppConfig:
         oauth_token_path=oauth_token_path,
         spreadsheet_title=spreadsheet_title,
         spreadsheet_id=spreadsheet_id,
+        theme=theme,
     )
 
 
