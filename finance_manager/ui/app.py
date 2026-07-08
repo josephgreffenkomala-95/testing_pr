@@ -4,6 +4,7 @@ import webbrowser
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 from rich.panel import Panel
 from textual.app import App, ComposeResult
@@ -22,7 +23,15 @@ from finance_manager.services.sheets import (
     InvalidSheetStructureError,
     MissingCredentialsError,
 )
-from finance_manager.ui.forms import ConfirmScreen, FormField, LIGHT_CONFIRM_CSS, LIGHT_FORM_CSS, RecordFormScreen
+from finance_manager.ui.forms import (
+    ConfirmScreen,
+    FormField,
+    LIGHT_CONFIRM_CSS,
+    LIGHT_FORM_CSS,
+    RecordFormScreen,
+    TOKYONIGHT_CONFIRM_CSS,
+    TOKYONIGHT_FORM_CSS,
+)
 from finance_manager.ui.screens import (
     ClientSecretResult,
     LIGHT_LOGIN_CSS,
@@ -32,6 +41,9 @@ from finance_manager.ui.screens import (
     SheetRef,
     SheetSelectScreen,
     SetupScreen,
+    TOKYONIGHT_LOGIN_CSS,
+    TOKYONIGHT_SETUP_CSS,
+    TOKYONIGHT_SHEET_CSS,
 )
 
 
@@ -294,6 +306,38 @@ THEMES: dict[str, str] = {
     "light": LIGHT_CSS,
 }
 
+THEME_PALETTES: dict[str, dict[str, object]] = {
+    "tokyonight": {
+        "accent": "#7aa2f7",
+        "positive": "#9ece6a",
+        "negative": "#f7768e",
+        "status": {"planned": "#e0af68", "confirmed": "#7aa2f7", "completed": "#9ece6a", "cancelled": "#f7768e"},
+    },
+    "light": {
+        "accent": "#4a90d9",
+        "positive": "#2e7d32",
+        "negative": "#c62828",
+        "status": {"planned": "#b26a00", "confirmed": "#2f73b8", "completed": "#2e7d32", "cancelled": "#c62828"},
+    },
+}
+
+SCREEN_THEME_CSS: dict[str, dict[str, str]] = {
+    "tokyonight": {
+        "form": TOKYONIGHT_FORM_CSS,
+        "confirm": TOKYONIGHT_CONFIRM_CSS,
+        "setup": TOKYONIGHT_SETUP_CSS,
+        "login": TOKYONIGHT_LOGIN_CSS,
+        "sheet": TOKYONIGHT_SHEET_CSS,
+    },
+    "light": {
+        "form": LIGHT_FORM_CSS,
+        "confirm": LIGHT_CONFIRM_CSS,
+        "setup": LIGHT_SETUP_CSS,
+        "login": LIGHT_LOGIN_CSS,
+        "sheet": LIGHT_SHEET_CSS,
+    },
+}
+
 
 @dataclass
 class RowRef:
@@ -370,41 +414,41 @@ class FinanceManagerApp(App[None]):
     def action_toggle_theme(self) -> None:
         self._current_theme = "light" if self._current_theme == "tokyonight" else "tokyonight"
         self.CSS = THEMES[self._current_theme]  # type: ignore[assignment,misc]
-        self.refresh_css()
         for screen in self.screen_stack:
             self._apply_theme_to_screen(screen)
+        self.refresh_css()
         persist_app_state(self.repository.config, theme=self._current_theme)
         self._refresh_ui(f"Theme: {self._current_theme}.")
 
     def _apply_theme_to_screen(self, screen) -> None:
-        from finance_manager.ui.forms import ConfirmScreen, LIGHT_CONFIRM_CSS, LIGHT_FORM_CSS, RecordFormScreen
-        from finance_manager.ui.screens import LIGHT_LOGIN_CSS, LIGHT_SETUP_CSS, LIGHT_SHEET_CSS, LoginScreen, SetupScreen, SheetSelectScreen
-        if self._current_theme == "light":
-            if isinstance(screen, RecordFormScreen):
-                screen.css = LIGHT_FORM_CSS  # type: ignore[assignment]
-            elif isinstance(screen, ConfirmScreen):
-                screen.css = LIGHT_CONFIRM_CSS  # type: ignore[assignment]
-            elif isinstance(screen, SetupScreen):
-                screen.css = LIGHT_SETUP_CSS  # type: ignore[assignment]
-            elif isinstance(screen, LoginScreen):
-                screen.css = LIGHT_LOGIN_CSS  # type: ignore[assignment]
-            elif isinstance(screen, SheetSelectScreen):
-                screen.css = LIGHT_SHEET_CSS  # type: ignore[assignment]
-            screen.refresh_css()  # type: ignore[union-attr]
-        elif isinstance(screen, (RecordFormScreen, ConfirmScreen, SetupScreen, LoginScreen, SheetSelectScreen)):
-            screen.css = None  # type: ignore[assignment]
-            screen.refresh_css()  # type: ignore[union-attr]
+        if isinstance(screen, RecordFormScreen):
+            category = "form"
+        elif isinstance(screen, ConfirmScreen):
+            category = "confirm"
+        elif isinstance(screen, SetupScreen):
+            category = "setup"
+        elif isinstance(screen, LoginScreen):
+            category = "login"
+        elif isinstance(screen, SheetSelectScreen):
+            category = "sheet"
+        else:
+            return
+        screen.css = self._theme_css(category)  # type: ignore[assignment]
 
     def _theme_css(self, category: str) -> str:
-        if self._current_theme == "light":
-            return {
-                "form": LIGHT_FORM_CSS,
-                "confirm": LIGHT_CONFIRM_CSS,
-                "setup": LIGHT_SETUP_CSS,
-                "login": LIGHT_LOGIN_CSS,
-                "sheet": LIGHT_SHEET_CSS,
-            }.get(category, "")
-        return ""
+        return SCREEN_THEME_CSS[self._current_theme].get(category, "")
+
+    def _theme_palette(self) -> dict[str, object]:
+        return THEME_PALETTES[self._current_theme]
+
+    def _accent_color(self) -> str:
+        return str(self._theme_palette()["accent"])
+
+    def _status_colors(self) -> dict[str, str]:
+        return cast(dict[str, str], self._theme_palette()["status"])
+
+    def _colorize(self, text: str, role: str) -> str:
+        return f"[{self._theme_palette()[role]}]{text}[/]"
 
     def _has_client_secret(self) -> bool:
         return self.repository.config.oauth_client_secret_path.exists()
@@ -596,23 +640,22 @@ class FinanceManagerApp(App[None]):
     def _fmt_amount_colored(self, amount: Decimal | float, currency: str = "IDR") -> str:
         formatted = _format_amount(amount, currency)
         if amount > 0:
-            return f"[green]{formatted}[/]"
+            return self._colorize(formatted, "positive")
         if amount < 0:
-            return f"[red]{formatted}[/]"
+            return self._colorize(formatted, "negative")
         return formatted
 
     def _fmt_type_colored(self, entry_type: str) -> str:
-        color = "green" if entry_type == "income" else "red"
-        return f"[{color}]{entry_type.upper()}[/]"
+        return self._colorize(entry_type.upper(), "positive" if entry_type == "income" else "negative")
 
     def _fmt_transaction(self, item: Transaction, categories: dict[str, str], accounts: dict[str, str]) -> str:
         amount = _format_amount(item.amount)
-        colored_amount = f"[green]{amount}[/]" if item.entry_type == "income" else f"[red]{amount}[/]"
+        colored_amount = self._colorize(amount, "positive" if item.entry_type == "income" else "negative")
         return f"{item.date} | {self._fmt_type_colored(item.entry_type)} | {colored_amount} | {categories.get(item.category_id, item.category_id)} | {accounts.get(item.account_id, item.account_id)} | {item.description}"
 
     def _fmt_planned(self, item: PlannedTransaction, categories: dict[str, str], accounts: dict[str, str], status_colors: dict[str, str]) -> str:
         amount = _format_amount(item.amount)
-        colored_amount = f"[green]{amount}[/]" if item.entry_type == "income" else f"[red]{amount}[/]"
+        colored_amount = self._colorize(amount, "positive" if item.entry_type == "income" else "negative")
         sc = status_colors.get(item.status)
         colored_status = f"[{sc}]{item.status.upper()}[/]" if sc else item.status.upper()
         return f"{item.expected_date or 'No date'} | {colored_status} | {self._fmt_type_colored(item.entry_type)} | {colored_amount} | {categories.get(item.category_id, item.category_id)} | {item.description}"
@@ -627,9 +670,9 @@ class FinanceManagerApp(App[None]):
     def _fmt_projection(self, point: ProjectionPoint) -> str:
         balance = self._fmt_amount_colored(point.balance)
         if point.change >= 0:
-            change = f"[green]{_format_amount(point.change)}[/]"
+            change = self._colorize(_format_amount(point.change), "positive")
         else:
-            change = f"[red]{_format_amount(point.change)}[/]"
+            change = self._colorize(_format_amount(point.change), "negative")
         return f"{point.label} | {balance} | {change}"
 
     def _fmt_account(self, account: Account) -> str:
@@ -639,7 +682,7 @@ class FinanceManagerApp(App[None]):
     def _rows_for_current_view(self) -> list[RowRef]:
         categories = {category.id: category.name for category in self.snapshot.categories}
         accounts = {account.id: account.name for account in self.snapshot.accounts}
-        status_colors = {"planned": "yellow", "confirmed": "blue", "completed": "green", "cancelled": "red"}
+        status_colors = self._status_colors()
         if self.current_view == "transactions":
             items = sorted(self.snapshot.transactions, key=lambda item: item.date, reverse=True)
             return [
@@ -746,7 +789,7 @@ class FinanceManagerApp(App[None]):
         lines = [f"[bold]{row.title}[/bold]", ""]
         for label, part in zip(labels, parts):
             lines.append(f"  [bold]{label}:[/] {part}")
-        detail.update(Panel("\n".join(lines), title="Details", border_style="blue"))
+        detail.update(Panel("\n".join(lines), title="Details", border_style=self._accent_color()))
 
     def on_data_table_row_highlighted(self, _event: DataTable.RowHighlighted) -> None:
         self._update_detail()

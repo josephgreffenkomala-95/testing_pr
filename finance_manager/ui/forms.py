@@ -12,6 +12,7 @@ TOKYONIGHT_FORM_CSS = """
 #form-modal {
     background: #24283b;
     color: #c0caf5;
+    border: round #7aa2f7;
 }
 .form-title {
     color: #7aa2f7;
@@ -41,10 +42,14 @@ Button {
 Button#save {
     background: #7aa2f7;
     color: #1a1b26;
+    border: solid #7aa2f7;
 }
 Button:hover {
-    background: #7aa2f7;
+    background: #89b4fa;
     color: #1a1b26;
+}
+Button#cancel {
+    color: #c0caf5;
 }
 """
 
@@ -62,7 +67,7 @@ class RecordFormScreen(ModalScreen[dict[str, str] | None]):
 
     def __init__(self, title: str, fields: list[FormField], hint: str = "", theme_css: str = "") -> None:
         super().__init__()
-        self.title = title
+        self.form_title = title
         self.fields = fields
         self.hint = hint
         if theme_css:
@@ -70,7 +75,7 @@ class RecordFormScreen(ModalScreen[dict[str, str] | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="form-modal"):
-            yield Label(self.title, classes="form-title")
+            yield Label(self.form_title, classes="form-title")
             if self.hint:
                 yield Static(self.hint, classes="form-hint")
             for field in self.fields:
@@ -99,6 +104,7 @@ LIGHT_FORM_CSS = """
 #form-modal {
     background: #ffffff;
     color: #333333;
+    border: round #4a90d9;
 }
 .form-title {
     color: #4a90d9;
@@ -121,16 +127,66 @@ Input.--placeholder {
     color: #999999;
 }
 Button {
-    background: #cccccc;
+    background: #e7edf5;
     color: #333333;
-    border: solid #cccccc;
+    border: solid #bccddd;
 }
 Button#save {
     background: #4a90d9;
     color: #ffffff;
+    border: solid #4a90d9;
 }
 Button:hover {
-    background: #4a90d9;
+    background: #dbe8f8;
+    color: #1f3b5b;
+}
+Button#save:hover {
+    background: #2f73b8;
+    color: #ffffff;
+}
+"""
+
+TOKYONIGHT_CONFIRM_CSS = """
+ConfirmScreen {
+    align: center middle;
+}
+#confirm-panel {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    background: #1a1b26;
+    border: round #f7768e;
+    color: #c0caf5;
+}
+#confirm-title {
+    text-style: bold;
+    color: #f7768e;
+    margin-bottom: 1;
+}
+#confirm-message {
+    color: #c0caf5;
+    margin-bottom: 1;
+}
+#confirm-detail {
+    color: #a9b1d6;
+    margin-bottom: 1;
+}
+#confirm-actions {
+    height: auto;
+    align-horizontal: right;
+}
+#confirm-yes {
+    background: #f7768e;
+    color: #1a1b26;
+    border: solid #f7768e;
+}
+#confirm-no {
+    background: #414868;
+    color: #c0caf5;
+    border: solid #565f89;
+}
+#confirm-no:hover {
+    background: #565f89;
     color: #ffffff;
 }
 """
@@ -145,6 +201,7 @@ ConfirmScreen {
     padding: 1 2;
     background: #ffffff;
     border: round #e74c3c;
+    color: #333333;
 }
 #confirm-title {
     text-style: bold;
@@ -166,54 +223,22 @@ ConfirmScreen {
 #confirm-yes {
     background: #e74c3c;
     color: #ffffff;
+    border: solid #e74c3c;
 }
 #confirm-no {
-    background: #cccccc;
+    background: #e7edf5;
     color: #333333;
+    border: solid #bccddd;
 }
-"""
-
-CONFIRM_CSS = """
-ConfirmScreen {
-    align: center middle;
-}
-#confirm-panel {
-    width: 60;
-    height: auto;
-    padding: 1 2;
-    background: #1a1b26;
-    border: round #f7768e;
-}
-#confirm-title {
-    text-style: bold;
-    color: #f7768e;
-    margin-bottom: 1;
-}
-#confirm-message {
-    color: #c0caf5;
-    margin-bottom: 1;
-}
-#confirm-detail {
-    color: #9aa5ce;
-    margin-bottom: 1;
-}
-#confirm-actions {
-    height: auto;
-    align-horizontal: right;
-}
-#confirm-yes {
-    background: #f7768e;
-    color: #1a1b26;
-}
-#confirm-no {
-    background: #414868;
-    color: #c0caf5;
+#confirm-no:hover {
+    background: #dbe8f8;
+    color: #1f3b5b;
 }
 """
 
 
 class ConfirmScreen(ModalScreen[bool | None]):
-    DEFAULT_CSS = CONFIRM_CSS
+    DEFAULT_CSS = TOKYONIGHT_CONFIRM_CSS
 
     def __init__(self, message: str, detail: str = "", theme_css: str = "") -> None:
         super().__init__()
