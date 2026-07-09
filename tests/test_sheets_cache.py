@@ -101,7 +101,7 @@ def test_clear_cache_allows_external_changes_to_be_visible(tmp_path):
     assert snapshot3.transactions[0].description == "External"
 
 
-def test_cache_is_cleared_on_write_operations(tmp_path):
+def test_cache_is_updated_on_write_operations(tmp_path):
     repo = build_repo(tmp_path)
     repo.bootstrap()
 
@@ -117,11 +117,100 @@ def test_cache_is_cleared_on_write_operations(tmp_path):
         "account": "Cash",
         "notes": "",
     })
-    assert repo._cache is None
+    assert repo._cache is not None
+    assert len(repo._cache.transactions) == 1
+    assert repo._cache.transactions[0].description == "First"
 
     snapshot2 = repo.load_snapshot()
     assert repo._cache is not None
     assert len(snapshot2.transactions) == 1
+
+
+def test_cache_is_updated_on_replace_entity(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+
+    tx = repo.add_transaction({
+        "entry_type": "expense",
+        "date": "2026-07-01",
+        "amount": "100.00",
+        "category": "Test",
+        "description": "Original",
+        "account": "Cash",
+        "notes": "",
+    })
+    assert len(repo._cache.transactions) == 1
+
+    repo.update_transaction(tx.id, {
+        "entry_type": "expense",
+        "date": "2026-07-01",
+        "amount": "200.00",
+        "category": "Test",
+        "description": "Updated",
+        "account": "Cash",
+        "notes": "",
+    })
+    assert len(repo._cache.transactions) == 1
+    assert repo._cache.transactions[0].description == "Updated"
+    assert repo._cache.transactions[0].amount == 200.00
+
+
+def test_cache_is_updated_on_delete_entity(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+
+    tx = repo.add_transaction({
+        "entry_type": "expense",
+        "date": "2026-07-01",
+        "amount": "100.00",
+        "category": "Test",
+        "description": "ToDelete",
+        "account": "Cash",
+        "notes": "",
+    })
+    assert len(repo._cache.transactions) == 1
+
+    repo.delete_transaction(tx.id)
+    assert len(repo._cache.transactions) == 0
+
+
+def test_get_entity_uses_cache(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+
+    tx = repo.add_transaction({
+        "entry_type": "expense",
+        "date": "2026-07-01",
+        "amount": "100.00",
+        "category": "Test",
+        "description": "Cached",
+        "account": "Cash",
+        "notes": "",
+    })
+
+    result = repo.get_transaction(tx.id)
+    assert result.id == tx.id
+    assert result.description == "Cached"
+
+
+def test_get_entity_without_prior_cache(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.bootstrap()
+
+    tx = repo.add_transaction({
+        "entry_type": "expense",
+        "date": "2026-07-01",
+        "amount": "100.00",
+        "category": "Test",
+        "description": "ColdLookup",
+        "account": "Cash",
+        "notes": "",
+    })
+    repo._cache = None
+
+    result = repo.get_transaction(tx.id)
+    assert result.id == tx.id
+    assert result.description == "ColdLookup"
 
 
 def test_cache_is_cleared_on_use_spreadsheet(tmp_path):

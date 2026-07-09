@@ -156,8 +156,9 @@ class GoogleSheetsRepository:
 
     def update_transaction(self, record_id: str, data: dict[str, str]) -> Transaction:
         current = self.get_transaction(record_id)
-        category = self.ensure_category(data["category"], data["entry_type"])
-        account = self.ensure_account(data["account"])
+        snapshot = self.load_snapshot()
+        category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
+        account = self.ensure_account(data["account"], accounts=snapshot.accounts)
         updated = replace(
             current,
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
@@ -176,8 +177,9 @@ class GoogleSheetsRepository:
         self._delete_entity("Transactions", record_id)
 
     def add_planned_transaction(self, data: dict[str, str]) -> PlannedTransaction:
-        category = self.ensure_category(data["category"], data["entry_type"])
-        account = self.ensure_account(data["account"])
+        snapshot = self.load_snapshot()
+        category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
+        account = self.ensure_account(data["account"], accounts=snapshot.accounts)
         entry = PlannedTransaction(
             id=self._next_id("Planned Transactions", "PLN"),
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
@@ -196,8 +198,9 @@ class GoogleSheetsRepository:
 
     def update_planned_transaction(self, record_id: str, data: dict[str, str]) -> PlannedTransaction:
         current = self.get_planned_transaction(record_id)
-        category = self.ensure_category(data["category"], data["entry_type"])
-        account = self.ensure_account(data["account"])
+        snapshot = self.load_snapshot()
+        category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
+        account = self.ensure_account(data["account"], accounts=snapshot.accounts)
         updated = replace(
             current,
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
@@ -217,7 +220,8 @@ class GoogleSheetsRepository:
         self._delete_entity("Planned Transactions", record_id)
 
     def add_budget(self, data: dict[str, str]) -> Budget:
-        category = self.ensure_category(data["category"], data["entry_type"])
+        snapshot = self.load_snapshot()
+        category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
         budget = Budget(
             id=self._next_id("Budgets", "BDG"),
             month=_require_month(data["month"]),
@@ -233,7 +237,8 @@ class GoogleSheetsRepository:
 
     def update_budget(self, record_id: str, data: dict[str, str]) -> Budget:
         current = self.get_budget(record_id)
-        category = self.ensure_category(data["category"], data["entry_type"])
+        snapshot = self.load_snapshot()
+        category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
         updated = replace(
             current,
             month=_require_month(data["month"]),
@@ -284,8 +289,8 @@ class GoogleSheetsRepository:
         account_type = data.get("account_type", "cash").strip().lower() or "cash"
         currency = data.get("currency", "IDR").strip().upper() or "IDR"
         balance = _require_amount(data.get("current_balance", "0"))
-        existing = self._read_entities("Accounts")
-        for account in existing:
+        snapshot = self.load_snapshot()
+        for account in snapshot.accounts:
             if account.name.lower() == cleaned_name.lower():
                 raise ValueError(f"Account '{cleaned_name}' already exists.")
         account = Account(
@@ -300,11 +305,12 @@ class GoogleSheetsRepository:
         return account
 
     def update_account(self, record_id: str, data: dict[str, str]) -> Account:
-        current = next((item for item in self._read_entities("Accounts") if item.id == record_id), None)
+        snapshot = self.load_snapshot()
+        current = next((item for item in snapshot.accounts if item.id == record_id), None)
         if current is None:
             raise KeyError(record_id)
         new_name = data["name"].strip() or current.name
-        for account in self._read_entities("Accounts"):
+        for account in snapshot.accounts:
             if account.id != record_id and account.name.lower() == new_name.lower():
                 raise ValueError(f"Account '{new_name}' already exists.")
         updated = replace(
@@ -321,15 +327,13 @@ class GoogleSheetsRepository:
         self._delete_entity("Accounts", record_id)
 
     def get_account(self, record_id: str) -> Account:
-        for account in self._read_entities("Accounts"):
+        snapshot = self.load_snapshot()
+        for account in snapshot.accounts:
             if account.id == record_id:
                 return account
         raise KeyError(record_id)
 
     def seed_dummy_data(self) -> int:
-        """Populate the sheet with sample accounts, categories, budgets and
-        transactions when it is empty. Returns the number of rows created.
-        """
         snapshot = self.load_snapshot()
         created = 0
         if not snapshot.accounts:
@@ -341,9 +345,10 @@ class GoogleSheetsRepository:
             for account in accounts:
                 self._append_entity("Accounts", account)
                 created += 1
-        accounts = self._read_entities("Accounts")
+            snapshot = self.load_snapshot()
+        accounts = snapshot.accounts
         needed_categories = ["Salary", "Freelance", "Groceries", "Rent", "Transport", "Dining", "Utilities"]
-        existing_category_names = {category.name.lower() for category in self._read_entities("Categories")}
+        existing_category_names = {category.name.lower() for category in snapshot.categories}
         for name in needed_categories:
             if name.lower() in existing_category_names:
                 continue
@@ -351,12 +356,12 @@ class GoogleSheetsRepository:
             category = Category(self._next_id("Categories", "CAT"), name, entry_type, True)
             self._append_entity("Categories", category)
             created += 1
-        categories = self._read_entities("Categories")
+        snapshot = self.load_snapshot()
+        categories = snapshot.categories
         cat_by_name = {category.name: category for category in categories}
         accounts_by_name = {account.name: account for account in accounts}
         month = datetime.now(UTC).strftime("%Y-%m")
-        existing_budgets = self._read_entities("Budgets")
-        if not existing_budgets:
+        if not snapshot.budgets:
             budgets = [
                 ("Groceries", "expense", Decimal("1500000.00")),
                 ("Rent", "expense", Decimal("3000000.00")),
@@ -377,8 +382,7 @@ class GoogleSheetsRepository:
                 )
                 self._append_entity("Budgets", budget)
                 created += 1
-        existing_tx = self._read_entities("Transactions")
-        if not existing_tx:
+        if not snapshot.transactions:
             today = datetime.now(UTC)
             samples = [
                 ("income", (today.replace(day=1)).strftime("%Y-%m-%d"), Decimal("12000000.00"), "Salary", "Bank BCA", "Monthly salary"),
@@ -531,7 +535,14 @@ class GoogleSheetsRepository:
     def _append_entity(self, title: str, entity: object) -> None:
         worksheet = self._worksheet(title)
         worksheet.append_row(entity_to_row(entity, SHEET_HEADERS[title]))
-        self._cache = None
+        self._append_entity_cache_update(title, entity)
+
+    def _append_entity_cache_update(self, title: str, entity: object) -> None:
+        if self._cache is not None and hasattr(entity, "id"):
+            entity_list = self._entity_list_for_title(self._cache, title)
+            if entity_list is not None:
+                entity_list.append(entity)
+                self._bump_counter(self._id_counters, getattr(entity, "id", ""), self._prefix_for_title(title))
 
     def _replace_entity(self, title: str, entity: object) -> None:
         worksheet = self._worksheet(title)
@@ -541,7 +552,13 @@ class GoogleSheetsRepository:
         for index, row in enumerate(records, start=2):
             if str(row.get("id")) == entity_id:
                 worksheet.update(f"A{index}:{self._col_name(len(headers))}{index}", [entity_to_row(entity, headers)])
-                self._cache = None
+                if self._cache is not None:
+                    entity_list = self._entity_list_for_title(self._cache, title)
+                    if entity_list is not None:
+                        for idx, existing in enumerate(entity_list):
+                            if existing.id == entity_id:
+                                entity_list[idx] = entity
+                                break
                 return
         raise KeyError(entity_id)
 
@@ -551,7 +568,10 @@ class GoogleSheetsRepository:
         for index, row in enumerate(records, start=2):
             if str(row.get("id")) == record_id:
                 worksheet.delete_rows(index)
-                self._cache = None
+                if self._cache is not None:
+                    entity_list = self._entity_list_for_title(self._cache, title)
+                    if entity_list is not None:
+                        entity_list[:] = [e for e in entity_list if e.id != record_id]
                 return
         raise KeyError(record_id)
 
@@ -580,16 +600,45 @@ class GoogleSheetsRepository:
             counters[prefix] = current
 
     def _get_entity(self, title: str, record_id: str):
-        for entity in self._read_entities(title):
-            if entity.id == record_id:
-                return entity
+        if self._cache is not None:
+            entity_list = self._entity_list_for_title(self._cache, title)
+            if entity_list is not None:
+                for entity in entity_list:
+                    if entity.id == record_id:
+                        return entity
+        else:
+            for entity in self._read_entities(title):
+                if entity.id == record_id:
+                    return entity
         raise KeyError(record_id)
+
+    @staticmethod
+    def _entity_list_for_title(snapshot: Snapshot, title: str):
+        mapping = {
+            "Transactions": snapshot.transactions,
+            "Planned Transactions": snapshot.planned_transactions,
+            "Budgets": snapshot.budgets,
+            "Categories": snapshot.categories,
+            "Accounts": snapshot.accounts,
+        }
+        return mapping.get(title)
 
     def _next_id(self, title: str, prefix: str) -> str:
         highest = self._id_counters.get(prefix, 0)
         next_value = highest + 1
         self._id_counters[prefix] = next_value
         return f"{prefix}{next_value:04d}"
+
+    @staticmethod
+    def _prefix_for_title(title: str) -> str:
+        mapping = {
+            "Transactions": "TX",
+            "Planned Transactions": "PLN",
+            "Budgets": "BDG",
+            "Categories": "CAT",
+            "Accounts": "ACC",
+        }
+        return mapping.get(title, "")
 
     @staticmethod
     def _col_name(index: int) -> str:
