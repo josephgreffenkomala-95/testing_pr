@@ -81,12 +81,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "migrate":
-        from finance_manager.services.migration import load_magang_from_path, migrate_magang
-
-        repository.bootstrap()
-        plan = load_magang_from_path(args.path, args.sheet)
-        report = migrate_magang(repository, plan, year=args.year)
-        print(report.summary())
+        print("Migration module has been removed.")
         return
 
     try:
