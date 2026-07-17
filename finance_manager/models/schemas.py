@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from decimal import Decimal
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, cast
 
 from .entities import Account, Budget, Category, PlannedTransaction, Transaction
 
@@ -122,7 +122,7 @@ def row_to_account(row: dict[str, str]) -> Account:
 
 
 def entity_to_row(entity: object, headers: Iterable[str]) -> list[str]:
-    raw = asdict(entity)
+    raw = asdict(cast(Any, entity))
     values = []
     for header in headers:
         value = raw.get(header, "")

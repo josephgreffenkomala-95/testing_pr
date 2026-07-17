@@ -62,13 +62,13 @@ class RecordFormScreen(ModalScreen[dict[str, str] | None]):
 
     def __init__(self, title: str, fields: list[FormField], hint: str = "") -> None:
         super().__init__()
-        self.title = title
+        self.form_title = title
         self.fields = fields
         self.hint = hint
 
     def compose(self) -> ComposeResult:
         with Vertical(id="form-modal"):
-            yield Label(self.title, classes="form-title")
+            yield Label(self.form_title, classes="form-title")
             if self.hint:
                 yield Static(self.hint, classes="form-hint")
             for field in self.fields:

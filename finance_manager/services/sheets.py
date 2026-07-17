@@ -9,6 +9,7 @@ from finance_manager.config.auth import load_oauth_credentials
 from finance_manager.config.settings import AppConfig, load_app_config, persist_app_state
 from finance_manager.models.entities import Account, Budget, Category, PlannedTransaction, Snapshot, Transaction
 from finance_manager.models.schemas import ROW_PARSERS, SHEET_HEADERS, entity_to_row
+from finance_manager.services.gateway import Clock, RecordIdGenerator, SheetRef, generate_record_id, utc_now
 
 
 class FinanceManagerError(Exception):
@@ -72,18 +73,26 @@ def _is_spreadsheet_not_found(exc: BaseException) -> bool:
 
 
 class GoogleSheetsRepository:
+    requires_authentication = True
+
     def __init__(
         self,
         config: AppConfig | None = None,
         *,
         client_factory: Any | None = None,
+        clock: Clock = utc_now,
+        record_id_generator: RecordIdGenerator = generate_record_id,
     ) -> None:
         self.config = config or load_app_config()
         self._client_factory = client_factory
-        self._client = None
-        self._spreadsheet = None
+        self._clock = clock
+        self._record_id_generator = record_id_generator
+        self._client: Any | None = None
+        self._spreadsheet: Any | None = None
         self._cache: Snapshot | None = None
-        self._id_counters: dict[str, int] = {}
+
+    def now(self) -> datetime:
+        return self._clock()
 
     def bootstrap(self) -> str:
         if self._spreadsheet is not None:
@@ -102,13 +111,16 @@ class GoogleSheetsRepository:
             return ""
         return getattr(self._spreadsheet, "url", "") or ""
 
-    def list_spreadsheets(self) -> list[tuple[str, str]]:
+    def list_spreadsheets(self) -> list[SheetRef]:
         client = self._get_client()
         try:
             spreadsheets = client.openall()
         except Exception as exc:
             raise ExternalServiceError(str(exc)) from exc
-        return [(getattr(spreadsheet, "id", ""), getattr(spreadsheet, "title", "")) for spreadsheet in spreadsheets]
+        return [
+            SheetRef(getattr(spreadsheet, "id", ""), getattr(spreadsheet, "title", ""))
+            for spreadsheet in spreadsheets
+        ]
 
     def use_spreadsheet(self, spreadsheet_id: str, title: str = "") -> str:
         self.config = replace(self.config, spreadsheet_id=spreadsheet_id, spreadsheet_title=title or spreadsheet_id)
@@ -132,7 +144,6 @@ class GoogleSheetsRepository:
             settings=self._read_settings(),
         )
         self._cache = snapshot
-        self._init_id_counters(snapshot)
         return snapshot
 
     def add_transaction(self, data: dict[str, str]) -> Transaction:
@@ -140,7 +151,7 @@ class GoogleSheetsRepository:
         category = self.ensure_category(data["category"], data["entry_type"], categories=snapshot.categories)
         account = self.ensure_account(data["account"], accounts=snapshot.accounts)
         entry = Transaction(
-            id=self._next_id("Transactions", "TX"),
+            id=self._next_id("TX"),
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
             date=_require_date(data["date"]) or "",
             amount=_require_amount(data["amount"]),
@@ -179,7 +190,7 @@ class GoogleSheetsRepository:
         category = self.ensure_category(data["category"], data["entry_type"])
         account = self.ensure_account(data["account"])
         entry = PlannedTransaction(
-            id=self._next_id("Planned Transactions", "PLN"),
+            id=self._next_id("PLN"),
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
             status=_require_choice(data["status"], ("planned", "confirmed", "completed", "cancelled"), "Status"),
             expected_date=_require_date(data.get("expected_date", ""), allow_blank=True),
@@ -219,7 +230,7 @@ class GoogleSheetsRepository:
     def add_budget(self, data: dict[str, str]) -> Budget:
         category = self.ensure_category(data["category"], data["entry_type"])
         budget = Budget(
-            id=self._next_id("Budgets", "BDG"),
+            id=self._next_id("BDG"),
             month=_require_month(data["month"]),
             category_id=category.id,
             entry_type=_require_choice(data["entry_type"], ("income", "expense"), "Type"),
@@ -256,7 +267,7 @@ class GoogleSheetsRepository:
         for category in existing:
             if category.name.lower() == cleaned_name.lower() and category.kind == cleaned_type:
                 return category
-        category = Category(id=self._next_id("Categories", "CAT"), name=cleaned_name, kind=cleaned_type, is_active=True)
+        category = Category(id=self._next_id("CAT"), name=cleaned_name, kind=cleaned_type, is_active=True)
         self._append_entity("Categories", category)
         return category
 
@@ -267,7 +278,7 @@ class GoogleSheetsRepository:
             if account.name.lower() == cleaned_name.lower():
                 return account
         account = Account(
-            id=self._next_id("Accounts", "ACC"),
+            id=self._next_id("ACC"),
             name=cleaned_name,
             account_type="cash",
             currency="IDR",
@@ -289,7 +300,7 @@ class GoogleSheetsRepository:
             if account.name.lower() == cleaned_name.lower():
                 raise ValueError(f"Account '{cleaned_name}' already exists.")
         account = Account(
-            id=self._next_id("Accounts", "ACC"),
+            id=self._next_id("ACC"),
             name=cleaned_name,
             account_type=account_type,
             currency=currency,
@@ -348,13 +359,13 @@ class GoogleSheetsRepository:
             if name.lower() in existing_category_names:
                 continue
             entry_type = "income" if name in {"Salary", "Freelance"} else "expense"
-            category = Category(self._next_id("Categories", "CAT"), name, entry_type, True)
-            self._append_entity("Categories", category)
+            new_category = Category(self._next_id("CAT"), name, entry_type, True)
+            self._append_entity("Categories", new_category)
             created += 1
         categories = self._read_entities("Categories")
         cat_by_name = {category.name: category for category in categories}
         accounts_by_name = {account.name: account for account in accounts}
-        month = datetime.now(UTC).strftime("%Y-%m")
+        month = self.now().astimezone(UTC).strftime("%Y-%m")
         existing_budgets = self._read_entities("Budgets")
         if not existing_budgets:
             budgets = [
@@ -365,13 +376,13 @@ class GoogleSheetsRepository:
                 ("Utilities", "expense", Decimal("600000.00")),
             ]
             for index, (name, entry_type, amount) in enumerate(budgets, start=1):
-                category = cat_by_name.get(name)
-                if category is None:
+                budget_category = cat_by_name.get(name)
+                if budget_category is None:
                     continue
                 budget = Budget(
                     id=f"BDG{index:04d}",
                     month=month,
-                    category_id=category.id,
+                    category_id=budget_category.id,
                     entry_type=entry_type,
                     amount=amount,
                 )
@@ -379,7 +390,7 @@ class GoogleSheetsRepository:
                 created += 1
         existing_tx = self._read_entities("Transactions")
         if not existing_tx:
-            today = datetime.now(UTC)
+            today = self.now().astimezone(UTC)
             samples = [
                 ("income", (today.replace(day=1)).strftime("%Y-%m-%d"), Decimal("12000000.00"), "Salary", "Bank BCA", "Monthly salary"),
                 ("income", (today.replace(day=3)).strftime("%Y-%m-%d"), Decimal("2500000.00"), "Freelance", "Bank Mandiri", "Side project"),
@@ -390,17 +401,17 @@ class GoogleSheetsRepository:
                 ("expense", (today.replace(day=7)).strftime("%Y-%m-%d"), Decimal("320000.00"), "Utilities", "Bank BCA", "Electricity bill"),
             ]
             for index, (entry_type, date_str, amount, category_name, account_name, description) in enumerate(samples, start=1):
-                category: Category | None = cat_by_name.get(category_name)
-                account: Account | None = accounts_by_name.get(account_name)
-                if category is None or account is None:
+                transaction_category = cat_by_name.get(category_name)
+                transaction_account = accounts_by_name.get(account_name)
+                if transaction_category is None or transaction_account is None:
                     continue
                 transaction = Transaction(
                     id=f"TX{index:04d}",
                     entry_type=entry_type,
                     date=date_str,
                     amount=amount,
-                    category_id=category.id,
-                    account_id=account.id,
+                    category_id=transaction_category.id,
+                    account_id=transaction_account.id,
                     description=description,
                     created_at=self._now(),
                     updated_at=self._now(),
@@ -470,10 +481,11 @@ class GoogleSheetsRepository:
         return self._client
 
     def _ensure_schema(self) -> None:
-        existing = {worksheet.title: worksheet for worksheet in self._spreadsheet.worksheets()}
+        spreadsheet = self._require_spreadsheet()
+        existing = {worksheet.title: worksheet for worksheet in spreadsheet.worksheets()}
         for title, headers in SHEET_HEADERS.items():
             if title not in existing:
-                worksheet = self._spreadsheet.add_worksheet(title=title, rows=100, cols=max(8, len(headers)))
+                worksheet = spreadsheet.add_worksheet(title=title, rows=100, cols=max(8, len(headers)))
                 worksheet.append_row(headers)
             else:
                 worksheet = existing[title]
@@ -511,7 +523,12 @@ class GoogleSheetsRepository:
             )
 
     def _worksheet(self, title: str):
-        return self._spreadsheet.worksheet(title)
+        return self._require_spreadsheet().worksheet(title)
+
+    def _require_spreadsheet(self) -> Any:
+        if self._spreadsheet is None:
+            raise RuntimeError("A Finance Sheet has not been opened.")
+        return self._spreadsheet
 
     def _read_entities(self, title: str):
         worksheet = self._worksheet(title)
@@ -555,41 +572,14 @@ class GoogleSheetsRepository:
                 return
         raise KeyError(record_id)
 
-    def _init_id_counters(self, snapshot: Snapshot) -> None:
-        counters = self._id_counters
-        for tx in snapshot.transactions:
-            self._bump_counter(counters, tx.id, "TX")
-        for planned in snapshot.planned_transactions:
-            self._bump_counter(counters, planned.id, "PLN")
-        for budget in snapshot.budgets:
-            self._bump_counter(counters, budget.id, "BDG")
-        for category in snapshot.categories:
-            self._bump_counter(counters, category.id, "CAT")
-        for account in snapshot.accounts:
-            self._bump_counter(counters, account.id, "ACC")
-
-    @staticmethod
-    def _bump_counter(counters: dict[str, int], value: str, prefix: str) -> None:
-        if not value.startswith(prefix):
-            return
-        try:
-            current = int(value[len(prefix):])
-        except ValueError:
-            return
-        if current > counters.get(prefix, 0):
-            counters[prefix] = current
-
     def _get_entity(self, title: str, record_id: str):
         for entity in self._read_entities(title):
             if entity.id == record_id:
                 return entity
         raise KeyError(record_id)
 
-    def _next_id(self, title: str, prefix: str) -> str:
-        highest = self._id_counters.get(prefix, 0)
-        next_value = highest + 1
-        self._id_counters[prefix] = next_value
-        return f"{prefix}{next_value:04d}"
+    def _next_id(self, prefix: str) -> str:
+        return self._record_id_generator(prefix)
 
     @staticmethod
     def _col_name(index: int) -> str:
@@ -599,6 +589,5 @@ class GoogleSheetsRepository:
             label = chr(65 + remainder) + label
         return label
 
-    @staticmethod
-    def _now() -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    def _now(self) -> str:
+        return self.now().astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")

@@ -1,22 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-
-if TYPE_CHECKING:
-    from finance_manager.services.sheets import GoogleSheetsRepository
-
-
-@dataclass
-class SheetRef:
-    spreadsheet_id: str
-    title: str
+from finance_manager.services.gateway import SheetRef
 
 
 @dataclass

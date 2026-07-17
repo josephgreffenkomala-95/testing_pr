@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import finance_manager.cli as cli
 
 
@@ -42,3 +44,17 @@ def test_default_command_runs_tui():
             cli.main([])
 
     launch_tui.assert_called_once_with(repository)
+
+
+def test_migration_command_is_not_supported(capsys) -> None:
+    """
+    Condition:
+    The removed specialized workbook migration command is passed to the CLI.
+
+    Expected:
+    Argument parsing rejects the unsupported command.
+    """
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["migrate", "moneyyy.xlsx"])
+
+    assert "invalid choice: 'migrate'" in capsys.readouterr().err

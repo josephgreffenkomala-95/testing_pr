@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-from finance_manager.models.entities import Account, Budget, Category, PlannedTransaction, Snapshot, Transaction
+from finance_manager.models.entities import Account, Category, Snapshot
 
 
 def _month_key(value: str) -> str:
@@ -50,17 +50,17 @@ def month_budget_report(snapshot: Snapshot, month: str) -> list[BudgetUsage]:
     actual_by_key: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
     planned_by_key: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
 
-    for item in snapshot.transactions:
-        if _month_key(item.date) != month:
+    for transaction in snapshot.transactions:
+        if _month_key(transaction.date) != month:
             continue
-        actual_by_key[(item.category_id, item.entry_type)] += item.amount
+        actual_by_key[(transaction.category_id, transaction.entry_type)] += transaction.amount
 
-    for item in snapshot.planned_transactions:
-        if item.status not in {"planned", "confirmed"}:
+    for plan in snapshot.planned_transactions:
+        if plan.status not in {"planned", "confirmed"}:
             continue
-        if item.expected_date and _month_key(item.expected_date) != month:
+        if plan.expected_date and _month_key(plan.expected_date) != month:
             continue
-        planned_by_key[(item.category_id, item.entry_type)] += item.amount
+        planned_by_key[(plan.category_id, plan.entry_type)] += plan.amount
 
     rows: list[BudgetUsage] = []
     for budget in snapshot.budgets:
@@ -121,5 +121,5 @@ def projection(snapshot: Snapshot, start_on: date | None = None) -> tuple[list[P
     return daily_points, monthly_points
 
 
-def current_month() -> str:
-    return datetime.now().strftime("%Y-%m")
+def current_month(today: date | None = None) -> str:
+    return (today or datetime.now().date()).strftime("%Y-%m")

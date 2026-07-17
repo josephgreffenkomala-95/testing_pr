@@ -1,7 +1,18 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from finance_manager.config.settings import AppConfig
 from finance_manager.services.sheets import GoogleSheetsRepository, InvalidSheetStructureError
+
+
+class SequentialRecordIdGenerator:
+    def __init__(self) -> None:
+        self.counters = {"ACC": 1, "CAT": 5}
+
+    def __call__(self, prefix: str) -> str:
+        next_value = self.counters.get(prefix, 0) + 1
+        self.counters[prefix] = next_value
+        return f"{prefix}{next_value:04d}"
 
 
 class FakeWorksheet:
@@ -77,7 +88,12 @@ def build_repo(tmp_path):
         spreadsheet_title="Personal Finance Manager",
         spreadsheet_id=None,
     )
-    return GoogleSheetsRepository(config=config, client_factory=FakeClient)
+    return GoogleSheetsRepository(
+        config=config,
+        client_factory=FakeClient,
+        clock=lambda: datetime(2026, 7, 17, 8, 30, tzinfo=UTC),
+        record_id_generator=SequentialRecordIdGenerator(),
+    )
 
 
 def test_bootstrap_creates_schema_and_defaults(tmp_path):
@@ -115,6 +131,7 @@ def test_transaction_crud_works_against_sheet_backend(tmp_path):
         }
     )
     assert created.id == "TX0001"
+    assert created.created_at == "2026-07-17 08:30:00"
 
     updated = repo.update_transaction(
         created.id,

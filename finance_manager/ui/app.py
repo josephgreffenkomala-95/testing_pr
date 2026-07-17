@@ -14,6 +14,7 @@ from finance_manager.config.auth import run_oauth_flow
 from finance_manager.config.settings import persist_app_state
 from finance_manager.logic.calculations import current_month, month_budget_report, projection, total_balance
 from finance_manager.models.entities import Account, Budget, PlannedTransaction, Snapshot, Transaction
+from finance_manager.services.gateway import FinanceGateway, SheetRef
 from finance_manager.services.sheets import (
     ExternalServiceError,
     FinanceManagerError,
@@ -22,7 +23,7 @@ from finance_manager.services.sheets import (
     MissingCredentialsError,
 )
 from finance_manager.ui.forms import FormField, RecordFormScreen
-from finance_manager.ui.screens import ClientSecretResult, LoginScreen, SheetRef, SheetSelectScreen, SetupScreen
+from finance_manager.ui.screens import ClientSecretResult, LoginScreen, SheetSelectScreen, SetupScreen
 
 
 TOKYONIGHT_CSS = """
@@ -154,9 +155,9 @@ class FinanceManagerApp(App[None]):
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, repository: GoogleSheetsRepository | None = None) -> None:
+    def __init__(self, gateway: FinanceGateway | None = None) -> None:
         super().__init__()
-        self.repository = repository or GoogleSheetsRepository()
+        self.repository = gateway or GoogleSheetsRepository()
         self.snapshot = Snapshot([], [], [], [], [], {})
         self.current_view = "transactions"
         self.current_rows: list[RowRef] = []
@@ -177,7 +178,10 @@ class FinanceManagerApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        if not self._has_client_secret():
+        if not self.repository.requires_authentication:
+            self.authenticated = True
+            self._load_data(initial=True)
+        elif not self._has_client_secret():
             self.push_screen(SetupScreen(str(self.repository.config.oauth_client_secret_path)), self._on_setup_result)
         elif not self._has_token():
             self.push_screen(LoginScreen(), self._on_login_result)
@@ -332,7 +336,7 @@ class FinanceManagerApp(App[None]):
 
     def _render_sidebar(self):
         balance = total_balance(self.snapshot.accounts)
-        month = current_month()
+        month = current_month(self.repository.now().date())
         budget_rows = month_budget_report(self.snapshot, month)
         overspent = sum(1 for row in budget_rows if row.is_projected_overspent)
         url = self.repository.spreadsheet_url()
@@ -389,7 +393,7 @@ class FinanceManagerApp(App[None]):
                 for item in planned_items
             ]
         if self.current_view == "budgets":
-            report = month_budget_report(self.snapshot, current_month())
+            report = month_budget_report(self.snapshot, current_month(self.repository.now().date()))
             return [
                 RowRef(
                     record_id=self._budget_id_for(row.category_name, row.entry_type) or row.category_name,
@@ -399,7 +403,7 @@ class FinanceManagerApp(App[None]):
                 for row in report
             ]
         if self.current_view == "projection":
-            daily, _ = projection(self.snapshot)
+            daily, _ = projection(self.snapshot, start_on=self.repository.now().date())
             return [
                 RowRef(
                     record_id=str(index),
@@ -588,7 +592,12 @@ class FinanceManagerApp(App[None]):
     def _open_budget_form(self, record: Budget | None = None) -> None:
         category_name = self._category_name(record.category_id) if record else ""
         fields = [
-            FormField("month", "Month", "YYYY-MM", record.month if record else current_month()),
+            FormField(
+                "month",
+                "Month",
+                "YYYY-MM",
+                record.month if record else current_month(self.repository.now().date()),
+            ),
             FormField("entry_type", "Type", "income or expense", record.entry_type if record else "expense"),
             FormField("category", "Category", "Groceries", category_name),
             FormField("amount", "Budget amount", "2500000.00", f"{record.amount:.2f}" if record else ""),
@@ -682,7 +691,11 @@ class FinanceManagerApp(App[None]):
     def _budget_id_for(self, category_name: str, entry_type: str) -> str:
         category_id = self._category_id_for_name(category_name)
         for budget in self.snapshot.budgets:
-            if budget.month == current_month() and budget.category_id == category_id and budget.entry_type == entry_type:
+            if (
+                budget.month == current_month(self.repository.now().date())
+                and budget.category_id == category_id
+                and budget.entry_type == entry_type
+            ):
                 return budget.id
         return ""
 
@@ -693,6 +706,6 @@ class FinanceManagerApp(App[None]):
         return account_id
 
 
-def run_tui(repository: GoogleSheetsRepository | None = None) -> None:
-    app = FinanceManagerApp(repository=repository)
+def run_tui(gateway: FinanceGateway | None = None) -> None:
+    app = FinanceManagerApp(gateway=gateway)
     app.run()

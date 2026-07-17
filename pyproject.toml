@@ -9,8 +9,10 @@ dependencies = [
     "google-auth-oauthlib>=1.2.1",
     "rich>=13.0.0",
     "textual>=2.0.0",
-    "openpyxl>=3.1.0",
 ]
+
+[tool.mypy]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["setuptools>=64"]

@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from finance_manager.config.auth import run_oauth_flow
+from finance_manager.services.gateway import FinanceGateway
 from finance_manager.services.sheets import GoogleSheetsRepository
 
 
@@ -22,26 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="Create or validate the Google Sheets database.")
     sub.add_parser("doctor", help="Run a configuration and connectivity check.")
     sub.add_parser("seed", help="Populate the sheet with sample data for demo/testing.")
-    migrate_parser = sub.add_parser(
-        "migrate",
-        help="Migrate a financial plan from an .xlsx workbook into the sheet.",
-    )
-    migrate_parser.add_argument("path", help="Path to the source .xlsx workbook.")
-    migrate_parser.add_argument(
-        "--sheet",
-        default="magang",
-        help="Worksheet inside the workbook to migrate (default: magang).",
-    )
-    migrate_parser.add_argument(
-        "--year",
-        type=int,
-        default=None,
-        help="Calendar year to apply to migrated rows (default: current year).",
-    )
     return parser
 
 
-def launch_tui(repository: GoogleSheetsRepository) -> None:
+def launch_tui(repository: FinanceGateway) -> None:
     from finance_manager.ui.app import run_tui
 
     run_tui(repository)
@@ -78,15 +63,6 @@ def main(argv: list[str] | None = None) -> None:
         repository.bootstrap()
         created = repository.seed_dummy_data()
         print(f"Seeded {created} sample rows into the spreadsheet.")
-        return
-
-    if args.command == "migrate":
-        from finance_manager.services.migration import load_magang_from_path, migrate_magang
-
-        repository.bootstrap()
-        plan = load_magang_from_path(args.path, args.sheet)
-        report = migrate_magang(repository, plan, year=args.year)
-        print(report.summary())
         return
 
     try:
