@@ -1,127 +1,122 @@
 # Finance Manager
 
-`finance-manager` is a personal finance CLI application with a Textual TUI and Google Sheets as its storage backend. On first run it can create the spreadsheet automatically, initialize a normalized multi-sheet structure, and then use that sheet as the app database.
+`finance-manager` is a single-Owner personal finance application. Its primary interface is a keyboard- and mouse-friendly Textual TUI; its durable, directly inspectable data lives in one Google Finance Sheet.
 
-The TUI uses a Tokyonight dark theme and walks first-time users through an in-app OAuth setup flow: a setup screen for the missing client secret, a login screen to trigger the Google OAuth flow, and a spreadsheet picker once authenticated.
+The app keeps completed financial history separate from future Plans and monthly Budgets. All amounts use one Base Currency and Python `Decimal` values. Transfers are one linked event, Balance Adjustments reconcile an Account without becoming income or expense, and normal correction workflows preserve history instead of deleting it.
 
-## Features
+## Install and launch
 
-- Track income and expenses with date, amount, category, description, account, and optional notes.
-- Manage planned transactions with optional dates and statuses: `planned`, `confirmed`, `completed`, `cancelled`.
-- Maintain monthly budgets per category and compare actual and planned spending against them.
-- View a balance timeline and monthly cash projection from current account balances plus planned cash movements.
-- Keep the data inspectable in Google Sheets with separate tabs for `Transactions`, `Planned Transactions`, `Budgets`, `Categories`, `Accounts`, and `Settings`.
-- Tokyonight dark theme across the main app, forms, and modal screens.
-- First-run guided OAuth setup: setup screen for the client secret, login screen for OAuth, and a spreadsheet picker once authenticated.
-
-## Installation
+Python 3.9 or newer is required.
 
 ```bash
 python3 -m pip install .
-```
-
-After installation, launch the app from anywhere with:
-
-```bash
 finance-manager
 ```
 
-You can also run health checks or initialize the sheet without opening the TUI:
+The default command opens the TUI. First-run Google connection, Finance Sheet creation, Base Currency selection, and first-Account setup all happen inside it; separate setup commands are not required.
+
+Useful diagnostics remain available:
 
 ```bash
 finance-manager doctor
-finance-manager init
+finance-manager --no-tui
 ```
 
-## Google Sheets Authentication
+## First-run Google OAuth
 
-The app uses OAuth for an installed desktop app, so it can act as your own Google account after you sign in once.
+Finance Manager uses an OAuth client owned by you. It does not ship a shared identity or send credentials to an application service.
 
-1. Create a Google Cloud project.
+1. Create or select a project in Google Cloud Console.
 2. Enable the Google Sheets API and Google Drive API.
 3. Configure the OAuth consent screen.
-4. Create an OAuth client of type `Desktop app`.
-5. Download the client JSON file.
-6. Place that file at:
+4. Create an OAuth client with application type **Desktop app**.
+5. Download its JSON file.
+6. Launch `finance-manager`, enter or select that file, and choose **Connect Google**.
 
-```text
-~/.config/finance-manager/google-oauth-client-secret.json
-```
+The app validates that the JSON is a complete Desktop client before opening browser authorization. OAuth failures are shown as actionable UI errors without logging client secrets, tokens, or financial data.
 
-7. Run:
+Refresh credentials are stored in the operating-system credential store through `keyring` when one is available. If it is unavailable, the TUI discloses the fallback and stores the credential file with owner-only `0600` permissions. Credentials never enter the Finance Sheet or `config.json`.
 
-```bash
-finance-manager auth
-```
-
-That opens a browser-based Google login and stores your refreshable token at:
-
-```text
-~/.config/finance-manager/google-oauth-token.json
-```
-
-You can override the paths with:
-
-- `FINANCE_MANAGER_OAUTH_CLIENT_SECRET`
-- `FINANCE_MANAGER_OAUTH_TOKEN`
-
-Optional environment variables:
+Configuration defaults to `$XDG_CONFIG_HOME/finance-manager`, or `~/.config/finance-manager` when `XDG_CONFIG_HOME` is unset. Supported overrides are:
 
 - `FINANCE_MANAGER_CONFIG_DIR`
+- `FINANCE_MANAGER_OAUTH_CLIENT_SECRET`
+- `FINANCE_MANAGER_OAUTH_TOKEN`
 - `FINANCE_MANAGER_SPREADSHEET_TITLE`
 - `FINANCE_MANAGER_SPREADSHEET_ID`
 
-The default config directory follows the XDG Base Directory Specification: it uses `$XDG_CONFIG_HOME/finance-manager` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/finance-manager`. The app stores local state in `config.json` inside that directory, including the last known spreadsheet ID.
+## Finance Sheet behavior
 
-After `finance-manager auth`, run:
+Creating a workspace makes a dedicated Sheet with these tabs:
 
-```bash
-finance-manager init
-finance-manager
-```
-
-## Google Sheet Layout
-
-The app ensures the following tabs exist with fixed headers:
-
-- `Transactions`
-- `Planned Transactions`
+- `Activity`
+- `Plans`
+- `Recurring Plans`
+- `Plan Exceptions`
 - `Budgets`
 - `Categories`
 - `Accounts`
 - `Settings`
 
-The schema is normalized: records store `category_id` and `account_id`, while the corresponding lookup tables remain editable and easy to inspect manually.
+The first run adds editable common Categories and your first dated Account only. It never seeds fake Activity, Plans, Budgets, or balances.
 
-## TUI Controls
+Opaque IDs, versions, timestamps, and link columns are managed system fields. They support direct editing, stale-form detection, recurrence, offline synchronization, and linked Plan completion, but stay hidden from normal TUI screens. Headers are frozen and system columns are protected with warnings where the Sheets API supports them.
 
-- `1` Transactions
-- `2` Planned transactions
-- `3` Budgets
-- `4` Projection
-- `5` Setup / status
-- `a` Add record in the current view
-- `e` Edit selected record
-- `d` Delete selected record
-- `r` Reload from Google Sheets
-- `l` Login (re-run the OAuth flow)
-- `q` Quit
+Direct Finance Sheet editing is an advanced supported workflow. Reload validates records independently and identifies the exact tab, row, column, and invalid value. A malformed unrelated row does not hide safe records; when a relationship could make totals unsafe, the TUI withholds those totals and explains what must be repaired. A TUI form opened on an older record version cannot overwrite a newer Sheet edit.
 
-## First-Run Flow
+## Financial model
 
-1. If the OAuth client secret is missing, the app opens a **Setup** screen prompting for the path to your downloaded `client_secret.json`.
-2. After the secret is in place, a **Login** screen starts the Google OAuth flow in your browser.
-3. Once authenticated, a **Spreadsheet picker** lists your Google Sheets. Pick one to use as the database, or, if you have none, the app bootstraps a fresh sheet automatically.
+- **Accounts** have a type (`cash`, `bank`, or `e-wallet`), Base Currency, Opening Date, and Opening Balance. Current and Historical Balances are derived from non-voided Activity.
+- **Activity** contains income, expenses, Transfers, and Balance Adjustments. Completed Activity cannot be future-dated or precede an Account's Opening Date. Negative balances are allowed and clearly warned.
+- **Transfers** decrease one Account and increase another by the same amount. They do not change total wealth, income, expense, or Budget usage.
+- **Voided Activity** keeps its original values and a required reason but no longer affects financial results.
+- **Plans** may be planned or confirmed and scheduled for an exact date, calendar month, or left unscheduled. Completed and cancelled Plans remain history.
+- **Recurring Plans** support weekly, monthly, and yearly frequencies. Month-end fallback preserves the requested day for later months, and Plan Exceptions change, cancel, or complete one occurrence.
+- **Budgets** and **Income Targets** are unique per Category and month, cross-Account, non-rolling, and advisory.
+- **Expected**, **Confirmed**, **Projected Balance Range**, and **Budget-Safe Balance** are separate answers. The Dashboard explains each in text and does not rely on a chart or color alone.
 
-## Error Handling
+## Offline encryption and synchronization
 
-The app includes explicit handling for:
+The offline gateway stores the complete synchronized Snapshot and ordered Offline Change queue as authenticated ciphertext. A key comes from the operating-system credential store when available. Without one, an unlock passphrase is required; there is no plaintext financial-data fallback.
 
-- missing OAuth client credentials
-- missing or expired OAuth token
-- import/authentication failures
-- network/API errors
-- invalid worksheet headers
-- empty database state
+Offline Account, Activity, Plan, recurrence, exception, completion, and Budget mutations update local calculations immediately and are marked `PENDING SYNC`. Plan completion is queued atomically with its linked Activity. Restarting restores the same ordered pending state.
 
-If credentials are missing or invalid, the TUI opens in a setup/error state with instructions instead of crashing.
+Synchronization distinguishes `Synced`, `Syncing`, `Offline`, `Pending changes`, and `Conflict`, with the last successful time when available. Non-conflicting work replays in order. A same-record collision pauses that record and exposes field-level local, Finance Sheet, or manual choices instead of last-write-wins. External deletion is treated as a conflict so Activity can be restored as Voided history and Plans as Cancelled history. Idempotent record IDs and linked completion IDs prevent duplicate retries.
+
+If an encrypted snapshot is missing, corrupt, or cannot be unlocked, Finance Manager fails safely and asks you to reconnect or use the correct unlock secret. It never guesses at financial state.
+
+## TUI controls
+
+- `1` Dashboard
+- `2` Activity
+- `3` Plans
+- `4` Budgets
+- `5` Projection
+- `6` Accounts
+- `7` Settings & Google Sheets
+- `i` add income
+- `x` add expense
+- `t` add Transfer
+- `a` add in the current workflow
+- `e` edit the selected record
+- `c` complete the selected Plan
+- `d` void Activity, cancel a Plan, or close an Account with confirmation
+- `r` reload
+- `Ctrl+S` sync now
+- `Ctrl+T` cycle Tokyonight, light, and high-contrast themes
+- `o` open the Finance Sheet
+- `q` quit
+
+Tokyonight is the default. Theme choice persists, focused controls use a visible border, statuses include text labels, and primary content remains readable at a 60-column narrow-terminal fallback.
+
+## Scope limits
+
+The first release intentionally excludes multiple Owners, shared household roles, mixed currencies and exchange rates, bank feeds, credit/loan/investment modeling, split Transactions, Category hierarchies, receipt/OCR workflows, arbitrary cron recurrence, automatic Budget rollover, fake-data onboarding, general CSV/XLSX import, and the obsolete specialized `magang` migration.
+
+## Verification
+
+```bash
+python3 -m pytest -q
+python3 -m ruff check finance_manager tests
+python3 -m mypy finance_manager
+```

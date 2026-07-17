@@ -22,7 +22,7 @@ def test_doctor_prints_summary(capsys):
     out = capsys.readouterr().out
     assert "Configuration OK" in out
     assert "Spreadsheet ID: sheet123" in out
-    assert "Planned transactions: 2" in out
+    assert "Plans: 2" in out
 
 
 def test_auth_runs_oauth_flow(capsys):
@@ -58,3 +58,17 @@ def test_migration_command_is_not_supported(capsys) -> None:
         cli.main(["migrate", "moneyyy.xlsx"])
 
     assert "invalid choice: 'migrate'" in capsys.readouterr().err
+
+
+def test_fake_data_seed_command_is_not_supported(capsys) -> None:
+    """
+    Condition:
+    The obsolete prototype fake-data command is passed to the release CLI.
+
+    Expected:
+    Argument parsing rejects it so onboarding can never create fake finances.
+    """
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["seed"])
+
+    assert "invalid choice: 'seed'" in capsys.readouterr().err

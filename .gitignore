@@ -1,1 +1,7 @@
 __pycache__/
+.finance-manager-memory/
+.env
+*.fm
+google-oauth-*.json
+oauth-client.json
+oauth-token.json

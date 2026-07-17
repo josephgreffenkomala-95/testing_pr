@@ -52,8 +52,8 @@ def test_in_memory_gateway_uses_injected_clock_and_record_id() -> None:
     )
 
     assert isinstance(gateway, FinanceGateway)
-    assert transaction.id == "TX-fixed"
-    assert transaction.created_at == "2026-07-17 08:30:00"
+    assert transaction.id == "ACT-fixed"
+    assert transaction.created_at == "2026-07-17T08:30:00Z"
     assert gateway.load_snapshot().transactions == [transaction]
 
 
@@ -74,7 +74,7 @@ def test_tui_runs_through_pilot_with_in_memory_gateway() -> None:
             assert app.query_one(DataTable).row_count == 0
             assert "Ready." in str(app.query_one("#status", Static).render())
 
-            await pilot.press("5")
+            await pilot.press("6")
 
             assert app.query_one(DataTable).row_count == 1
             assert "Accounts" in str(app.query_one("#tabs", Static).render())

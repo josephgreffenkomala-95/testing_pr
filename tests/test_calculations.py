@@ -55,9 +55,9 @@ def test_projection_uses_future_planned_transactions():
 
     daily, monthly = projection(snapshot, start_on=date(2026, 7, 5))
 
-    assert daily[0].balance == Decimal("1250.00")
+    assert daily[0].balance == Decimal("1630.00")
     assert daily[1].label == "2026-07-10"
-    assert daily[1].balance == Decimal("1170.00")
-    assert daily[2].balance == Decimal("1370.00")
+    assert daily[1].balance == Decimal("1550.00")
+    assert daily[2].balance == Decimal("1750.00")
     assert monthly[0].label == "2026-07"
-    assert monthly[0].balance == Decimal("1370.00")
+    assert monthly[0].balance == Decimal("1750.00")

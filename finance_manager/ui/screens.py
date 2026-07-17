@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Select, Static
 
 from finance_manager.services.gateway import SheetRef
 
@@ -15,6 +15,16 @@ class ClientSecretResult:
     """Result from the setup screen: whether to proceed and the chosen path."""
     proceed: bool
     client_secret_path: str
+
+
+@dataclass(frozen=True)
+class WorkspaceSetupResult:
+    base_currency: str
+    account_name: str
+    account_type: str
+    opening_date: str
+    opening_balance: str
+    use_existing: bool = False
 
 
 class SetupScreen(ModalScreen[ClientSecretResult | None]):
@@ -205,8 +215,6 @@ class SheetSelectScreen(ModalScreen[SheetRef | None]):
                 yield Button("Cancel", id="sheet-cancel")
 
     def on_mount(self) -> None:
-        # Populate the ListView after mount rather than during compose, per
-        # Textual conventions that avoid widget mutation inside compose().
         list_view = self.query_one("#sheet-list", ListView)
         for sheet in self.sheets:
             list_view.append(ListItem(Label(f"{sheet.title}\n{sheet.spreadsheet_id}")))
@@ -220,3 +228,86 @@ class SheetSelectScreen(ModalScreen[SheetRef | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "sheet-cancel":
             self.dismiss(None)
+
+
+class WorkspaceSetupScreen(ModalScreen[WorkspaceSetupResult | None]):
+    DEFAULT_CSS = """
+    WorkspaceSetupScreen { align: center middle; }
+    #workspace-panel { width: 72; height: auto; padding: 1 2; border: round #7aa2f7; background: #24283b; }
+    #workspace-title { text-style: bold; margin-bottom: 1; }
+    .workspace-label { margin-top: 1; }
+    #workspace-error { color: #f7768e; height: auto; }
+    #workspace-actions { height: auto; margin-top: 1; }
+    """
+
+    def __init__(self, today: str, base_currency: str = "IDR") -> None:
+        super().__init__()
+        self.today = today
+        self.base_currency = base_currency
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="workspace-panel"):
+            yield Label("Create your Finance Sheet", id="workspace-title")
+            yield Static(
+                "Confirm one Base Currency, then create the first Account. No fake financial records will be added."
+            )
+            yield Label("Base Currency", classes="workspace-label")
+            yield Input(value=self.base_currency, id="workspace-currency")
+            yield Label("First Account name", classes="workspace-label")
+            yield Input(placeholder="Cash or Bank", id="workspace-account")
+            yield Label("Account type", classes="workspace-label")
+            yield Select.from_values(["cash", "bank", "e-wallet"], value="cash", id="workspace-type")
+            yield Label("Opening Date", classes="workspace-label")
+            yield Input(value=self.today, id="workspace-date")
+            yield Label("Opening Balance", classes="workspace-label")
+            yield Input(value="0.00", type="number", id="workspace-balance")
+            yield Static("", id="workspace-error")
+            with Vertical(id="workspace-actions"):
+                yield Button("Create Finance Sheet", id="workspace-create", variant="primary")
+                yield Button("Use existing compatible Finance Sheet", id="workspace-existing")
+                yield Button("Cancel", id="workspace-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "workspace-cancel":
+            self.dismiss(None)
+            return
+        currency = self.query_one("#workspace-currency", Input).value.strip().upper()
+        if event.button.id == "workspace-existing":
+            self.dismiss(WorkspaceSetupResult(currency, "", "cash", self.today, "0.00", True))
+            return
+        name = self.query_one("#workspace-account", Input).value.strip()
+        opening_date = self.query_one("#workspace-date", Input).value.strip()
+        opening_balance = self.query_one("#workspace-balance", Input).value.strip()
+        account_type = str(self.query_one("#workspace-type", Select).value)
+        if len(currency) != 3 or not currency.isalpha():
+            self.query_one("#workspace-error", Static).update("Base Currency must be a three-letter code.")
+            return
+        if not name:
+            self.query_one("#workspace-error", Static).update("First Account name is required.")
+            return
+        self.dismiss(WorkspaceSetupResult(currency, name, account_type, opening_date, opening_balance))
+
+
+class ConfirmationScreen(ModalScreen[bool]):
+    DEFAULT_CSS = """
+    ConfirmationScreen { align: center middle; }
+    #confirm-panel { width: 64; height: auto; padding: 2; border: round #e0af68; background: #24283b; }
+    #confirm-actions { height: auto; margin-top: 1; }
+    """
+
+    def __init__(self, title: str, impact: str, confirm_label: str = "Confirm") -> None:
+        super().__init__()
+        self.confirm_title = title
+        self.impact = impact
+        self.confirm_label = confirm_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-panel"):
+            yield Label(self.confirm_title)
+            yield Static(self.impact)
+            with Vertical(id="confirm-actions"):
+                yield Button(self.confirm_label, id="confirm-yes", variant="warning")
+                yield Button("Cancel", id="confirm-no")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm-yes")

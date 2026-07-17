@@ -18,6 +18,9 @@ class AppConfig:
     oauth_token_path: Path
     spreadsheet_title: str
     spreadsheet_id: str | None
+    base_currency: str = "IDR"
+    theme: str = "tokyonight"
+    projection_date: str = ""
 
 
 def _default_config_dir() -> Path:
@@ -58,6 +61,9 @@ def load_app_config() -> AppConfig:
         "FINANCE_MANAGER_SPREADSHEET_ID",
         stored.get("spreadsheet_id"),
     )
+    base_currency = str(stored.get("base_currency", "IDR")).upper()
+    theme = str(stored.get("theme", "tokyonight"))
+    projection_date = str(stored.get("projection_date", ""))
 
     return AppConfig(
         config_dir=config_dir,
@@ -66,10 +72,14 @@ def load_app_config() -> AppConfig:
         oauth_token_path=oauth_token_path,
         spreadsheet_title=spreadsheet_title,
         spreadsheet_id=spreadsheet_id,
+        base_currency=base_currency,
+        theme=theme,
+        projection_date=projection_date,
     )
 
 
 def persist_app_state(config: AppConfig, **updates: Any) -> None:
+    config.config_dir.mkdir(parents=True, exist_ok=True)
     current: dict[str, Any] = {}
     if config.config_path.exists():
         current = json.loads(config.config_path.read_text())
